@@ -154,3 +154,8 @@ public sealed record AnalyzeResult(
 public sealed record BuildResult(
     string OutputRoot,
     IReadOnlyList<string> WrittenFiles);
+
+public sealed record ExportXmlResult(
+    string RootFolder,
+    IReadOnlyList<string> WrittenFiles,
+    IReadOnlyList<string> SkippedFiles);

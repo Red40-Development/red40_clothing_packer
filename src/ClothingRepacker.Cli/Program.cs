@@ -2,6 +2,7 @@ using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core;
+using ClothingRepacker.CodeWalker;
 
 var exitCode = await ProgramEntry.RunAsync(args);
 return exitCode;
@@ -18,7 +19,7 @@ internal static class ProgramEntry
 
         var command = args[0].ToLowerInvariant();
         var options = ParseOptions(args.Skip(1).ToArray());
-        var service = new RepackerService(new XmlPassthroughYmtCodec());
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
 
         try
         {
@@ -34,6 +35,8 @@ internal static class ProgramEntry
                     return await RunRestoreAsync(service, options);
                 case "validate":
                     return await RunValidateAsync(service, options);
+                case "export-xml":
+                    return await RunExportXmlAsync(service, options);
                 default:
                     Console.Error.WriteLine($"Unknown command '{command}'.");
                     PrintHelp();
@@ -127,6 +130,19 @@ internal static class ProgramEntry
         throw new InvalidOperationException("validate requires --plan or --resources.");
     }
 
+    private static async Task<int> RunExportXmlAsync(RepackerService service, Dictionary<string, string?> options)
+    {
+        var folder = Required(options, "--folder");
+        var result = await service.ExportYmtsToXmlAsync(folder, options.ContainsKey("--overwrite"));
+        Console.WriteLine($"Exported {result.WrittenFiles.Count} YMT XML file(s).");
+        if (result.SkippedFiles.Count > 0)
+        {
+            Console.WriteLine($"Skipped {result.SkippedFiles.Count} existing XML file(s).");
+        }
+
+        return 0;
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
@@ -136,6 +152,7 @@ clothing-repacker apply --plan <plan.json> --backup-root <folder> --yes
 clothing-repacker restore --backup-manifest <backup-manifest.json> --yes
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>
+clothing-repacker export-xml --folder <path> [--overwrite]
 """);
     }
 

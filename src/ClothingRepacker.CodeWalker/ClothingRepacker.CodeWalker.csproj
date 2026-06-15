@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\CodeWalker\CodeWalker.Core\CodeWalker.Core.csproj" />
     <ProjectReference Include="..\ClothingRepacker.Core\ClothingRepacker.Core.csproj" />
   </ItemGroup>
 

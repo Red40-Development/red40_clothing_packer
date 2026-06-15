@@ -87,7 +87,7 @@ public sealed class RepackerService
                 propMappings.AddRange(builder.AddProps(source));
             }
 
-            var outputYmtPath = Path.Combine(targetResource, "stream", $"{target.FullCollectionName}.ymt.xml");
+            var outputYmtPath = Path.Combine(targetResource, "stream", $"{target.FullCollectionName}.ymt");
             targetPlans.Add(new TargetCollectionPlan(
                 target.CollectionName,
                 target.FullCollectionName,
@@ -166,8 +166,12 @@ public sealed class RepackerService
             var relativeYmtPath = targetPlan.OutputYmtPath.Replace('/', Path.DirectorySeparatorChar);
             var ymtOutputPath = Path.Combine(fullOutputRoot, relativeYmtPath);
             Directory.CreateDirectory(Path.GetDirectoryName(ymtOutputPath)!);
-            xml.Save(ymtOutputPath);
+            await _codec.EncodeFromXmlAsync(xml, ymtOutputPath, cancellationToken);
             writtenFiles.Add(ymtOutputPath);
+
+            var previewXmlPath = ymtOutputPath + ".xml";
+            xml.Save(previewXmlPath);
+            writtenFiles.Add(previewXmlPath);
 
             var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
@@ -186,6 +190,40 @@ public sealed class RepackerService
         writtenFiles.Add(validationPath);
 
         return new BuildResult(fullOutputRoot, writtenFiles);
+    }
+
+    public async Task<ExportXmlResult> ExportYmtsToXmlAsync(string folderPath, bool overwrite, CancellationToken cancellationToken = default)
+    {
+        var fullRoot = Path.GetFullPath(folderPath);
+        if (!Directory.Exists(fullRoot))
+        {
+            throw new DirectoryNotFoundException(fullRoot);
+        }
+
+        var writtenFiles = new List<string>();
+        var skippedFiles = new List<string>();
+        var ymtFiles = Directory.GetFiles(fullRoot, "*.ymt", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var ymtPath in ymtFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var xmlPath = ymtPath + ".xml";
+            if (!overwrite && File.Exists(xmlPath))
+            {
+                skippedFiles.Add(xmlPath);
+                continue;
+            }
+
+            var xml = await _codec.DecodeToXmlAsync(ymtPath, cancellationToken);
+            Directory.CreateDirectory(Path.GetDirectoryName(xmlPath)!);
+            xml.Save(xmlPath);
+            writtenFiles.Add(xmlPath);
+        }
+
+        return new ExportXmlResult(fullRoot, writtenFiles, skippedFiles);
     }
 
     public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, bool yes, CancellationToken cancellationToken = default)
@@ -341,11 +379,28 @@ public sealed class RepackerService
     private static string BuildMinimalShopMeta(TargetCollectionPlan plan)
         => $$"""
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Placeholder minimal shop meta. Replace with a fully valid SHOP_PED_APPAREL_META_FILE before in-game use. -->
 <ShopPedApparel>
-  <Collection name="{{plan.CollectionName}}" fullName="{{plan.FullCollectionName}}" gender="{{plan.Gender}}" />
+  <pedName>{{InferPedBaseName(plan.FullCollectionName)}}</pedName>
+  <dlcName>{{plan.CollectionName}}</dlcName>
+  <fullDlcName>{{plan.FullCollectionName}}</fullDlcName>
+  <eCharacter>{{GetCharacterName(plan.Gender)}}</eCharacter>
+  <creatureMetaData>MP_CreatureMetadata_{{plan.CollectionName}}</creatureMetaData>
+  <pedOutfits>
+  </pedOutfits>
+  <pedComponents>
+  </pedComponents>
+  <pedProps>
+  </pedProps>
 </ShopPedApparel>
 """;
+
+    private static string GetCharacterName(PedGender gender)
+        => gender switch
+        {
+            PedGender.Female => "SCR_CHAR_MULTIPLAYER_F",
+            PedGender.Male => "SCR_CHAR_MULTIPLAYER",
+            _ => "SCR_CHAR_MULTIPLAYER",
+        };
 
     private static string BuildFxManifest(MergePlan plan)
     {

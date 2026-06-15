@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ClothingRepacker.Core\ClothingRepacker.Core.csproj" />
+    <ProjectReference Include="..\ClothingRepacker.CodeWalker\ClothingRepacker.CodeWalker.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
