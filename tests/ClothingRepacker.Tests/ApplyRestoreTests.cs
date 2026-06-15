@@ -28,14 +28,14 @@ public class ApplyRestoreTests
         var plan = await service.LoadPlanAsync(planPath);
 
         var backupRoot = Path.Combine(root, "backups");
-        var entries = await service.ApplyAsync(plan, backupRoot, yes: true);
+        var entries = await service.ApplyAsync(plan, backupRoot);
 
         Assert.False(File.Exists(sourceYmt));
         Assert.Contains(entries, entry => entry.Kind == "old-ymt");
         Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
 
         var manifest = Directory.GetFiles(backupRoot, "backup-manifest.json", SearchOption.AllDirectories).Single();
-        await service.RestoreAsync(manifest, yes: true);
+        await service.RestoreAsync(manifest);
 
         Assert.True(File.Exists(sourceYmt));
         Assert.True(File.Exists(sourceDrawable));
