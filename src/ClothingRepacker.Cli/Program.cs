@@ -88,14 +88,14 @@ internal static class ProgramEntry
     private static async Task<int> RunApplyAsync(RepackerService service, Dictionary<string, string?> options)
     {
         var plan = await service.LoadPlanAsync(Required(options, "--plan"));
-        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"), options.ContainsKey("--yes"));
+        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"));
         Console.WriteLine($"Applied plan with {entries.Count} backup entries.");
         return 0;
     }
 
     private static async Task<int> RunRestoreAsync(RepackerService service, Dictionary<string, string?> options)
     {
-        await service.RestoreAsync(Required(options, "--backup-manifest"), options.ContainsKey("--yes"));
+        await service.RestoreAsync(Required(options, "--backup-manifest"));
         Console.WriteLine("Restore complete.");
         return 0;
     }
@@ -148,8 +148,8 @@ internal static class ProgramEntry
         Console.WriteLine("""
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
 clothing-repacker build --plan <plan.json> --out <folder>
-clothing-repacker apply --plan <plan.json> --backup-root <folder> --yes
-clothing-repacker restore --backup-manifest <backup-manifest.json> --yes
+clothing-repacker apply --plan <plan.json> --backup-root <folder>
+clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>
 clothing-repacker export-xml --folder <path> [--overwrite]

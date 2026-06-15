@@ -226,12 +226,8 @@ public sealed class RepackerService
         return new ExportXmlResult(fullRoot, writtenFiles, skippedFiles);
     }
 
-    public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, bool yes, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, CancellationToken cancellationToken = default)
     {
-        if (!yes)
-        {
-            throw new InvalidOperationException("apply requires --yes.");
-        }
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -289,12 +285,8 @@ public sealed class RepackerService
         return entries;
     }
 
-    public async Task RestoreAsync(string backupManifestPath, bool yes, CancellationToken cancellationToken = default)
+    public async Task RestoreAsync(string backupManifestPath, CancellationToken cancellationToken = default)
     {
-        if (!yes)
-        {
-            throw new InvalidOperationException("restore requires --yes.");
-        }
 
         var entries = JsonSerializer.Deserialize<List<BackupEntry>>(await File.ReadAllTextAsync(backupManifestPath, cancellationToken), _jsonOptions)
             ?? throw new InvalidDataException("Invalid backup manifest.");
