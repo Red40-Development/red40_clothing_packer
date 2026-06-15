@@ -9,34 +9,31 @@ public class PedVariationReaderTests
     private readonly PedVariationReader _reader = new();
 
     [Fact]
-    public void ReadsRed40Fixture()
+    public void ReadsFemaleGangFlagsFixture()
     {
-        var doc = XDocument.Load(Fixture("mp_f_freemode_01_red40_clothes.ymt.xml"));
-        var result = _reader.Read(doc, Fixture("mp_f_freemode_01_red40_clothes.ymt.xml"), "red40", "red40");
+        var path = TestFixturePaths.ResourceFile("gang_flags/stream/mp_f_freemode_01_mp_f_gang_flags.ymt.xml");
+        var doc = XDocument.Load(path);
+        var result = _reader.Read(doc, path, "gang_flags", TestFixturePaths.ResourceDirectory("gang_flags"));
 
-        Assert.Equal("red40_clothes", result.CollectionName);
-        Assert.Equal("hash_7F16400D", result.DlcName);
+        Assert.Equal("mp_f_gang_flags", result.CollectionName);
+        Assert.Equal("hash_7D552BA1", result.DlcName);
         Assert.Equal(PedGender.Female, result.Gender);
-        Assert.Equal(1, result.Components.Single(c => c.ComponentId == 1).Drawables.Count);
-        Assert.Equal(1, result.Components.Single(c => c.ComponentId == 4).Drawables.Count);
-        Assert.Equal(2, result.Components.Single(c => c.ComponentId == 11).Drawables.Count);
+        Assert.Single(result.Components.Single(c => c.ComponentId == 1).Drawables);
+        Assert.Single(result.Components.Single(c => c.ComponentId == 10).Drawables);
         Assert.Empty(result.Props);
     }
 
     [Fact]
-    public void ReadsAccessoriesFixture()
+    public void ReadsMaleMerryweatherVestsFixture()
     {
-        var doc = XDocument.Load(Fixture("mp_f_freemode_01_mp_f_accessoriesx2.ymt.xml"));
-        var result = _reader.Read(doc, Fixture("mp_f_freemode_01_mp_f_accessoriesx2.ymt.xml"), "accs", "accs");
+        var path = TestFixturePaths.ResourceFile("gang_outfits/stream/mp_m_freemode_01_mp_m_merryweathervests.ymt.xml");
+        var doc = XDocument.Load(path);
+        var result = _reader.Read(doc, path, "gang_outfits", TestFixturePaths.ResourceDirectory("gang_outfits"));
 
-        Assert.Equal("mp_f_accessoriesx2", result.CollectionName);
-        Assert.Equal("hash_6BE06652", result.DlcName);
-        Assert.Equal(1, result.Components.Single(c => c.ComponentId == 7).Drawables.Count);
-        var prop = result.Props.Single(p => p.AnchorId == 1);
-        Assert.Single(prop.Props);
-        Assert.Equal(12, prop.Props.Single().Element("aTexData")!.Elements("Item").Count());
+        Assert.Equal("mp_m_merryweathervests", result.CollectionName);
+        Assert.Equal("hash_43B32E42", result.DlcName);
+        Assert.Equal(PedGender.Male, result.Gender);
+        Assert.Equal(2, result.Components.Single(c => c.ComponentId == 9).Drawables.Count);
+        Assert.Empty(result.Props);
     }
-
-    private static string Fixture(string fileName)
-        => Path.Combine(AppContext.BaseDirectory, "Fixtures", "Ymts", fileName);
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClothingRepacker.CodeWalker;
 using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
@@ -13,17 +14,14 @@ public class ApplyRestoreTests
         var root = Path.Combine(Path.GetTempPath(), $"repacker-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var resources = Path.Combine(root, "resources");
-        var resource = Path.Combine(resources, "red40");
-        var stream = Path.Combine(resource, "stream");
-        Directory.CreateDirectory(stream);
-        await File.WriteAllTextAsync(Path.Combine(resource, "fxmanifest.lua"), "fx_version 'cerulean'");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
 
-        var sourceYmt = Path.Combine(stream, "mp_f_freemode_01_red40_clothes.ymt.xml");
-        File.Copy(Fixture("mp_f_freemode_01_red40_clothes.ymt.xml"), sourceYmt);
-        var sourceDrawable = Path.Combine(stream, "mp_f_freemode_01_red40_clothes^jbib_000_u.ydd");
+        var stream = Path.Combine(resources, "gang_flags", "stream");
+        var sourceYmt = Path.Combine(stream, "mp_f_freemode_01_mp_f_gang_flags.ymt");
+        var sourceDrawable = Path.Combine(stream, "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
         await File.WriteAllTextAsync(sourceDrawable, "drawable");
 
-        var service = new RepackerService(new XmlPassthroughYmtCodec());
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var planPath = Path.Combine(root, "plan.json");
         await service.SavePlanAsync(analyze.Plan, planPath);
@@ -32,7 +30,7 @@ public class ApplyRestoreTests
         var backupRoot = Path.Combine(root, "backups");
         var entries = await service.ApplyAsync(plan, backupRoot, yes: true);
 
-        Assert.DoesNotContain(sourceYmt, Directory.GetFiles(stream, "*.xml", SearchOption.AllDirectories));
+        Assert.False(File.Exists(sourceYmt));
         Assert.Contains(entries, entry => entry.Kind == "old-ymt");
         Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
 
@@ -42,7 +40,4 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(sourceYmt));
         Assert.True(File.Exists(sourceDrawable));
     }
-
-    private static string Fixture(string fileName)
-        => Path.Combine(AppContext.BaseDirectory, "Fixtures", "Ymts", fileName);
 }

@@ -1,0 +1,99 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<CPedVariationInfo name="mp_m_gang_flags">
+ <bHasTexVariations value="true" />
+ <bHasDrawblVariations value="false" />
+ <bHasLowLODs value="false" />
+ <bIsSuperLOD value="false" />
+ <availComp>255 0 255 255 255 255 255 255 255 255 1 255</availComp>
+ <aComponentData3 itemType="CPVComponentData">
+  <Item>
+   <numAvailTex value="4" />
+   <aDrawblData3 itemType="CPVDrawblData">
+    <Item>
+     <propMask value="1" />
+     <numAlternatives value="0" />
+     <aTexData itemType="CPVTextureData">
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+     </aTexData>
+     <clothData>
+      <ownsCloth value="false" />
+     </clothData>
+    </Item>
+   </aDrawblData3>
+  </Item>
+  <Item>
+   <numAvailTex value="3" />
+   <aDrawblData3 itemType="CPVDrawblData">
+    <Item>
+     <propMask value="5" />
+     <numAlternatives value="0" />
+     <aTexData itemType="CPVTextureData">
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+      <Item>
+       <texId value="0" />
+       <distribution value="255" />
+      </Item>
+     </aTexData>
+     <clothData>
+      <ownsCloth value="false" />
+     </clothData>
+    </Item>
+   </aDrawblData3>
+  </Item>
+ </aComponentData3>
+ <aSelectionSets itemType="CPedSelectionSet" />
+ <compInfos itemType="CComponentInfo">
+  <Item>
+   <pedXml_audioID>none</pedXml_audioID>
+   <pedXml_audioID2 />
+   <pedXml_expressionMods>0 0 0 0 0</pedXml_expressionMods>
+   <flags value="0" />
+   <inclusions>0</inclusions>
+   <exclusions>0</exclusions>
+   <pedXml_vfxComps>PV_COMP_HEAD</pedXml_vfxComps>
+   <pedXml_flags value="0" />
+   <pedXml_compIdx value="10" />
+   <pedXml_drawblIdx value="0" />
+  </Item>
+  <Item>
+   <pedXml_audioID>none</pedXml_audioID>
+   <pedXml_audioID2 />
+   <pedXml_expressionMods>0 0 0 0 0</pedXml_expressionMods>
+   <flags value="0" />
+   <inclusions>0</inclusions>
+   <exclusions>0</exclusions>
+   <pedXml_vfxComps>PV_COMP_HEAD</pedXml_vfxComps>
+   <pedXml_flags value="0" />
+   <pedXml_compIdx value="1" />
+   <pedXml_drawblIdx value="0" />
+  </Item>
+ </compInfos>
+ <propInfo>
+  <numAvailProps value="0" />
+  <aPropMetaData itemType="CPedPropMetaData" />
+  <aAnchors itemType="CAnchorProps" />
+ </propInfo>
+ <dlcName>hash_0ACC2D0B</dlcName>
+</CPedVariationInfo>

@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\ClothingRepacker.CodeWalker\ClothingRepacker.CodeWalker.csproj" />
     <ProjectReference Include="..\..\src\ClothingRepacker.Core\ClothingRepacker.Core.csproj" />
   </ItemGroup>
 

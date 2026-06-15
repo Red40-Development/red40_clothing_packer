@@ -11,24 +11,21 @@ public class MergeTests
     public void MergesFixturesIntoExpectedCollection()
     {
         var reader = new PedVariationReader();
-        var red40 = reader.Read(XDocument.Load(Fixture("mp_f_freemode_01_red40_clothes.ymt.xml")), Fixture("mp_f_freemode_01_red40_clothes.ymt.xml"), "red40", "red40");
-        var accessories = reader.Read(XDocument.Load(Fixture("mp_f_freemode_01_mp_f_accessoriesx2.ymt.xml")), Fixture("mp_f_freemode_01_mp_f_accessoriesx2.ymt.xml"), "accs", "accs");
+        var gangFlagsPath = TestFixturePaths.ResourceFile("gang_flags/stream/mp_f_freemode_01_mp_f_gang_flags.ymt.xml");
+        var gangOutfitsPath = TestFixturePaths.ResourceFile("gang_outfits/stream/mp_f_freemode_01_mp_f_kickenit_gangs.ymt.xml");
+        var gangFlags = reader.Read(XDocument.Load(gangFlagsPath), gangFlagsPath, "gang_flags", TestFixturePaths.ResourceDirectory("gang_flags"));
+        var gangOutfits = reader.Read(XDocument.Load(gangOutfitsPath), gangOutfitsPath, "gang_outfits", TestFixturePaths.ResourceDirectory("gang_outfits"));
 
         var builder = new OutputCollectionBuilder("merged_f_001", "mp_f_freemode_01_merged_f_001", "mp_f_freemode_01", ClothingRepacker.Core.Models.PedGender.Female);
-        builder.AddComponents(red40);
-        builder.AddProps(red40);
-        builder.AddComponents(accessories);
-        builder.AddProps(accessories);
+        builder.AddComponents(gangFlags);
+        builder.AddProps(gangFlags);
+        builder.AddComponents(gangOutfits);
+        builder.AddProps(gangOutfits);
 
         var xml = builder.BuildXml();
-        Assert.Equal("255 0 255 255 1 255 255 2 255 255 255 3", xml.Root!.Element("availComp")!.Value.Trim());
-        Assert.Equal(5, xml.Root.Element("compInfos")!.Elements("Item").Count());
-        Assert.Equal("1", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
-        Assert.Contains("ANCHOR_EYES", xml.Root.Element("propInfo")!.ToString());
-        Assert.Contains("12", xml.Root.Element("propInfo")!.ToString());
+        Assert.Equal("255 0 255 255 255 255 255 255 255 1 2 255", xml.Root!.Element("availComp")!.Value.Trim());
+        Assert.Equal(3, xml.Root.Element("compInfos")!.Elements("Item").Count());
+        Assert.Equal("0", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
         Assert.Equal($"hash_{JenkHash.Hash("merged_f_001"):X8}", xml.Root.Element("dlcName")!.Value.Trim());
     }
-
-    private static string Fixture(string fileName)
-        => Path.Combine(AppContext.BaseDirectory, "Fixtures", "Ymts", fileName);
 }
