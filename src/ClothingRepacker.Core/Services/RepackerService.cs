@@ -32,7 +32,7 @@ public sealed class RepackerService
         _codec = codec;
     }
 
-    public async Task<AnalyzeResult> AnalyzeAsync(string resourcesRoot, string targetResource, MergePlanSettings settings, CancellationToken cancellationToken = default)
+    public async Task<AnalyzeResult> AnalyzeAsync(string resourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         var scanItems = _scanner.ScanResources(resourcesRoot);
         var sources = new List<SourceYmt>();
@@ -40,6 +40,7 @@ public sealed class RepackerService
         var warnings = new List<string>();
         var errors = new List<string>();
         var manifestWarnings = new List<SourceManifestWarning>();
+        var workItems = new List<(ResourceScanItem Item, string Path)>();
 
         foreach (var item in scanItems)
         {
@@ -51,17 +52,22 @@ public sealed class RepackerService
 
             foreach (var path in item.YmtFiles.Where(IsLikelyPedVariationXml))
             {
-                XDocument xml;
-                try
-                {
-                    xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    errors.Add($"{path}: could not decode YMT/XML ({ex.Message})");
-                    continue;
-                }
+                workItems.Add((item, path));
+            }
+        }
 
+        progress?.Report(new OperationProgress(
+            "analyze",
+            "start",
+            Total: workItems.Count,
+            Message: $"Found {scanItems.Count} resources, {workItems.Count} YMT/XML candidates, {streamFiles.Count} stream files."));
+
+        for (var index = 0; index < workItems.Count; index++)
+        {
+            var (item, path) = workItems[index];
+            try
+            {
+                var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
                 if (xml.Root?.Name.LocalName != "CPedVariationInfo")
                 {
                     continue;
@@ -72,14 +78,41 @@ public sealed class RepackerService
                 errors.AddRange(source.Messages.Where(message => message.Severity == ValidationSeverity.Error).Select(message => $"{path}: {message.Message}"));
                 sources.Add(source);
             }
+            catch (Exception ex)
+            {
+                errors.Add($"{path}: {ex.Message}");
+            }
+            finally
+            {
+                progress?.Report(new OperationProgress(
+                    "analyze",
+                    "process-source",
+                    index + 1,
+                    workItems.Count,
+                    path,
+                    SourceCount: sources.Count,
+                    WarningCount: warnings.Count,
+                    ErrorCount: errors.Count));
+            }
         }
+
+        progress?.Report(new OperationProgress(
+            "analyze",
+            "plan-targets",
+            workItems.Count,
+            workItems.Count,
+            Message: "Planning merged target collections.",
+            SourceCount: sources.Count,
+            WarningCount: warnings.Count,
+            ErrorCount: errors.Count));
 
         var targets = _mergePlanner.Plan(sources, settings, warnings, errors);
         var drawableMappings = new List<DrawableMapping>();
         var propMappings = new List<PropMapping>();
         var targetPlans = new List<TargetCollectionPlan>();
-        foreach (var target in targets)
+        for (var index = 0; index < targets.Count; index++)
         {
+            var target = targets[index];
             var builder = new OutputCollectionBuilder(target.CollectionName, target.FullCollectionName, target.PedBaseName, target.Gender);
             foreach (var source in target.Sources)
             {
@@ -96,10 +129,33 @@ public sealed class RepackerService
                 target.Sources.Select(source => source.YmtPath).ToList(),
                 builder.GetComponentCounts(),
                 builder.GetPropCounts()));
+
+            progress?.Report(new OperationProgress(
+                "analyze",
+                "build-plan",
+                index + 1,
+                targets.Count,
+                target.FullCollectionName,
+                SourceCount: sources.Count,
+                WarningCount: warnings.Count,
+                ErrorCount: errors.Count,
+                TargetCount: targetPlans.Count));
         }
 
         var streamRenames = _streamRenamePlanner.BuildRenamePlan(drawableMappings, propMappings, streamFiles);
         errors.AddRange(_streamRenamePlanner.ValidateCollisions(streamRenames));
+
+        progress?.Report(new OperationProgress(
+            "analyze",
+            "complete",
+            workItems.Count,
+            workItems.Count,
+            Message: "Analyze complete.",
+            SourceCount: sources.Count,
+            WarningCount: warnings.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            ErrorCount: errors.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+            TargetCount: targetPlans.Count,
+            RenameCount: streamRenames.Count));
 
         var plan = new MergePlan
         {
@@ -145,15 +201,23 @@ public sealed class RepackerService
             ?? throw new InvalidDataException($"Could not read plan {planPath}.");
     }
 
-    public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, CancellationToken cancellationToken = default)
+    public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var sources = await ReloadSourcesForPlanAsync(plan, cancellationToken);
+        var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
         var writtenFiles = new List<string>();
         var fullOutputRoot = Path.GetFullPath(outputRoot);
         Directory.CreateDirectory(fullOutputRoot);
 
-        foreach (var targetPlan in plan.TargetCollections)
+        progress?.Report(new OperationProgress(
+            "build",
+            "start",
+            Total: plan.TargetCollections.Count,
+            Message: $"Loaded {sources.Count} source YMTs for {plan.TargetCollections.Count} target collections.",
+            SourceCount: sources.Count));
+
+        for (var index = 0; index < plan.TargetCollections.Count; index++)
         {
+            var targetPlan = plan.TargetCollections[index];
             var builder = new OutputCollectionBuilder(targetPlan.CollectionName, targetPlan.FullCollectionName, InferPedBaseName(targetPlan.FullCollectionName), targetPlan.Gender);
             foreach (var sourcePath in targetPlan.SourceYmts)
             {
@@ -177,6 +241,16 @@ public sealed class RepackerService
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
             await File.WriteAllTextAsync(metaPath, BuildMinimalShopMeta(targetPlan), cancellationToken);
             writtenFiles.Add(metaPath);
+
+            progress?.Report(new OperationProgress(
+                "build",
+                "write-target",
+                index + 1,
+                plan.TargetCollections.Count,
+                targetPlan.FullCollectionName,
+                SourceCount: sources.Count,
+                TargetCount: index + 1,
+                WrittenFileCount: writtenFiles.Count));
         }
 
         var fxmanifestPath = Path.Combine(fullOutputRoot, plan.TargetResource, "fxmanifest.lua");
@@ -189,10 +263,20 @@ public sealed class RepackerService
         await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
         writtenFiles.Add(validationPath);
 
+        progress?.Report(new OperationProgress(
+            "build",
+            "complete",
+            plan.TargetCollections.Count,
+            plan.TargetCollections.Count,
+            Message: "Build complete.",
+            SourceCount: sources.Count,
+            TargetCount: plan.TargetCollections.Count,
+            WrittenFileCount: writtenFiles.Count));
+
         return new BuildResult(fullOutputRoot, writtenFiles);
     }
 
-    public async Task<ExportXmlResult> ExportYmtsToXmlAsync(string folderPath, bool overwrite, CancellationToken cancellationToken = default)
+    public async Task<ExportXmlResult> ExportYmtsToXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         var fullRoot = Path.GetFullPath(folderPath);
         if (!Directory.Exists(fullRoot))
@@ -206,14 +290,29 @@ public sealed class RepackerService
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        foreach (var ymtPath in ymtFiles)
+        progress?.Report(new OperationProgress(
+            "export-xml",
+            "start",
+            Total: ymtFiles.Count,
+            Message: $"Found {ymtFiles.Count} YMT files to export."));
+
+        for (var index = 0; index < ymtFiles.Count; index++)
         {
+            var ymtPath = ymtFiles[index];
             cancellationToken.ThrowIfCancellationRequested();
 
             var xmlPath = ymtPath + ".xml";
             if (!overwrite && File.Exists(xmlPath))
             {
                 skippedFiles.Add(xmlPath);
+                progress?.Report(new OperationProgress(
+                    "export-xml",
+                    "export-file",
+                    index + 1,
+                    ymtFiles.Count,
+                    ymtPath,
+                    WrittenFileCount: writtenFiles.Count,
+                    SkippedCount: skippedFiles.Count));
                 continue;
             }
 
@@ -221,13 +320,36 @@ public sealed class RepackerService
             Directory.CreateDirectory(Path.GetDirectoryName(xmlPath)!);
             xml.Save(xmlPath);
             writtenFiles.Add(xmlPath);
+
+            progress?.Report(new OperationProgress(
+                "export-xml",
+                "export-file",
+                index + 1,
+                ymtFiles.Count,
+                ymtPath,
+                WrittenFileCount: writtenFiles.Count,
+                SkippedCount: skippedFiles.Count));
         }
+
+        progress?.Report(new OperationProgress(
+            "export-xml",
+            "complete",
+            ymtFiles.Count,
+            ymtFiles.Count,
+            Message: "XML export complete.",
+            WrittenFileCount: writtenFiles.Count,
+            SkippedCount: skippedFiles.Count));
 
         return new ExportXmlResult(fullRoot, writtenFiles, skippedFiles);
     }
 
-    public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        progress?.Report(new OperationProgress(
+            "apply",
+            "start",
+            Total: plan.StreamRenames.Count + plan.SourceYmts.Count,
+            Message: $"Preparing to apply {plan.StreamRenames.Count} stream renames and {plan.SourceYmts.Count} YMT backups."));
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -240,11 +362,16 @@ public sealed class RepackerService
         Directory.CreateDirectory(backupDir);
 
         var stagingRoot = Path.Combine(Path.GetTempPath(), $"clothing-repacker-{Guid.NewGuid():N}");
-        var buildResult = await BuildAsync(plan, stagingRoot, cancellationToken);
+        progress?.Report(new OperationProgress(
+            "apply",
+            "build-staging",
+            Message: "Building generated resource into a staging folder."));
+        var buildResult = await BuildAsync(plan, stagingRoot, progress, cancellationToken);
         var entries = new List<BackupEntry>();
 
-        foreach (var rename in plan.StreamRenames)
+        for (var index = 0; index < plan.StreamRenames.Count; index++)
         {
+            var rename = plan.StreamRenames[index];
             if (!File.Exists(rename.SourcePath))
             {
                 throw new FileNotFoundException($"Source file missing at apply time: {rename.SourcePath}");
@@ -254,10 +381,20 @@ public sealed class RepackerService
             Directory.CreateDirectory(Path.GetDirectoryName(rename.TargetPath)!);
             File.Move(rename.SourcePath, rename.TargetPath);
             entries.Add(new BackupEntry("stream-rename", rename.SourcePath, null, rename.TargetPath, beforeHash, ComputeSha256(rename.TargetPath), DateTimeOffset.UtcNow));
+
+            progress?.Report(new OperationProgress(
+                "apply",
+                "rename-stream",
+                index + 1,
+                plan.StreamRenames.Count,
+                rename.TargetPath,
+                RenameCount: index + 1,
+                BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
         }
 
-        foreach (var source in plan.SourceYmts)
+        for (var index = 0; index < plan.SourceYmts.Count; index++)
         {
+            var source = plan.SourceYmts[index];
             if (!File.Exists(source.Path))
             {
                 continue;
@@ -269,6 +406,15 @@ public sealed class RepackerService
             var beforeHash = ComputeSha256(source.Path);
             File.Delete(source.Path);
             entries.Add(new BackupEntry("old-ymt", source.Path, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+
+            progress?.Report(new OperationProgress(
+                "apply",
+                "backup-source-ymt",
+                index + 1,
+                plan.SourceYmts.Count,
+                source.Path,
+                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+                BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
         }
 
         var generatedRoot = Path.Combine(Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot, plan.TargetResource);
@@ -280,8 +426,27 @@ public sealed class RepackerService
         CopyDirectory(Path.Combine(buildResult.OutputRoot, plan.TargetResource), generatedRoot);
         entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
 
+        progress?.Report(new OperationProgress(
+            "apply",
+            "copy-generated-resource",
+            Message: $"Copied generated resource to {generatedRoot}.",
+            RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+            BackupCount: entries.Count(entry => entry.Kind == "old-ymt"),
+            WrittenFileCount: buildResult.WrittenFiles.Count));
+
         var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
         await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(entries, _jsonOptions), cancellationToken);
+
+        progress?.Report(new OperationProgress(
+            "apply",
+            "complete",
+            plan.StreamRenames.Count + plan.SourceYmts.Count,
+            plan.StreamRenames.Count + plan.SourceYmts.Count,
+            Message: $"Apply complete. Backup manifest written to {manifestPath}.",
+            RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+            BackupCount: entries.Count(entry => entry.Kind == "old-ymt"),
+            WrittenFileCount: buildResult.WrittenFiles.Count));
+
         return entries;
     }
 
@@ -324,13 +489,22 @@ public sealed class RepackerService
 
     public IReadOnlyList<string> ValidatePlan(MergePlan plan) => _planValidator.Validate(plan);
 
-    private async Task<Dictionary<string, SourceYmt>> ReloadSourcesForPlanAsync(MergePlan plan, CancellationToken cancellationToken)
+    private async Task<Dictionary<string, SourceYmt>> ReloadSourcesForPlanAsync(MergePlan plan, IProgress<OperationProgress>? progress, CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, SourceYmt>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in plan.SourceYmts)
+        for (var index = 0; index < plan.SourceYmts.Count; index++)
         {
+            var source = plan.SourceYmts[index];
             var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
             result[source.Path] = _reader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
+
+            progress?.Report(new OperationProgress(
+                "build",
+                "load-source",
+                index + 1,
+                plan.SourceYmts.Count,
+                source.Path,
+                SourceCount: index + 1));
         }
 
         return result;

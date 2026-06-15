@@ -127,7 +127,8 @@ public sealed class MergePlan
 public sealed class MergePlanSettings
 {
     public string TargetPrefix { get; init; } = "merged";
-    public int MaxDrawablesPerType { get; init; } = ClothingConstants.DefaultMaxDrawablesPerType;
+    public int MaxDrawablesPerComponent { get; init; } = ClothingConstants.DefaultMaxDrawablesPerComponent;
+    public int MaxDrawablesPerProp { get; init; } = ClothingConstants.DefaultMaxDrawablesPerProp;
     public string ShopMetaMode { get; init; } = "minimal";
     public bool RenameStreamsInPlace { get; init; } = true;
     public string FemalePrefix { get; init; } = "merged_f";

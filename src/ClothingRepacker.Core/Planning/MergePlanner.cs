@@ -16,7 +16,7 @@ public sealed class MergePlanner
             var index = 1;
             foreach (var source in orderedSources)
             {
-                if (!FitsSingleCollection(source, settings.MaxDrawablesPerType))
+                if (!FitsSingleCollection(source, settings.MaxDrawablesPerComponent, settings.MaxDrawablesPerProp))
                 {
                     errors.Add($"Source YMT exceeds capacity and needs manual review: {source.YmtPath}");
                     continue;
@@ -25,7 +25,7 @@ public sealed class MergePlanner
                 var output = outputs.FirstOrDefault(candidate =>
                     candidate.PedBaseName == source.PedBaseName &&
                     candidate.Gender == source.Gender &&
-                    candidate.CanFit(source, settings.MaxDrawablesPerType));
+                    candidate.CanFit(source, settings.MaxDrawablesPerComponent, settings.MaxDrawablesPerProp));
 
                 if (output is null)
                 {
@@ -60,7 +60,7 @@ public sealed class MergePlanner
             source.Components.Select(component => component.Drawables.Count).DefaultIfEmpty(0).Max(),
             source.Props.Select(prop => prop.Props.Count).DefaultIfEmpty(0).Max());
 
-    private static bool FitsSingleCollection(SourceYmt source, int maxPerType)
-        => source.Components.All(component => component.Drawables.Count <= maxPerType)
-           && source.Props.All(prop => prop.Props.Count <= maxPerType);
+    private static bool FitsSingleCollection(SourceYmt source, int maxDrawablesPerComponent, int maxDrawablesPerProp)
+        => source.Components.All(component => component.Drawables.Count <= maxDrawablesPerComponent)
+           && source.Props.All(prop => prop.Props.Count <= maxDrawablesPerProp);
 }

@@ -13,12 +13,12 @@ public sealed class OutputCollectionCapacity
     public Dictionary<int, int> PropCounts { get; } = [];
     public List<SourceYmt> Sources { get; } = [];
 
-    public bool CanFit(SourceYmt source, int maxPerType)
+    public bool CanFit(SourceYmt source, int maxDrawablesPerComponent, int maxDrawablesPerProp)
     {
         foreach (var component in source.Components)
         {
             var current = ComponentCounts.GetValueOrDefault(component.ComponentId);
-            if (current + component.Drawables.Count > maxPerType)
+            if (current + component.Drawables.Count > maxDrawablesPerComponent)
             {
                 return false;
             }
@@ -27,7 +27,7 @@ public sealed class OutputCollectionCapacity
         foreach (var prop in source.Props)
         {
             var current = PropCounts.GetValueOrDefault(prop.AnchorId);
-            if (current + prop.Props.Count > maxPerType)
+            if (current + prop.Props.Count > maxDrawablesPerProp)
             {
                 return false;
             }
