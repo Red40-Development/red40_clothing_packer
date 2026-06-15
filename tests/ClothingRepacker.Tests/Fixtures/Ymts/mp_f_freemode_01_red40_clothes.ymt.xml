@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CPedVariationInfo name="red40_clothes">
+  <bHasTexVariations value="true" />
+  <bHasDrawblVariations value="true" />
+  <bHasLowLODs value="false" />
+  <bIsSuperLOD value="false" />
+  <availComp>255 0 255 255 1 255 255 255 255 255 255 2</availComp>
+  <aComponentData3 itemType="CPVComponentData">
+    <Item>
+      <numAvailTex value="1" />
+      <aDrawblData3 itemType="CPVDrawblData">
+        <Item>
+          <aTexData itemType="CPVTextureData"><Item /><Item /></aTexData>
+        </Item>
+      </aDrawblData3>
+    </Item>
+    <Item>
+      <numAvailTex value="1" />
+      <aDrawblData3 itemType="CPVDrawblData">
+        <Item>
+          <aTexData itemType="CPVTextureData"><Item /></aTexData>
+        </Item>
+      </aDrawblData3>
+    </Item>
+    <Item>
+      <numAvailTex value="2" />
+      <aDrawblData3 itemType="CPVDrawblData">
+        <Item>
+          <aTexData itemType="CPVTextureData"><Item /></aTexData>
+        </Item>
+        <Item>
+          <aTexData itemType="CPVTextureData"><Item /><Item /><Item /></aTexData>
+        </Item>
+      </aDrawblData3>
+    </Item>
+  </aComponentData3>
+  <aSelectionSets itemType="CPedSelectionSet" />
+  <compInfos itemType="CComponentInfo">
+    <Item><pedXml_compIdx value="1" /><pedXml_drawblIdx value="0" /></Item>
+    <Item><pedXml_compIdx value="4" /><pedXml_drawblIdx value="0" /></Item>
+    <Item><pedXml_compIdx value="11" /><pedXml_drawblIdx value="0" /></Item>
+    <Item><pedXml_compIdx value="11" /><pedXml_drawblIdx value="1" /></Item>
+  </compInfos>
+  <propInfo>
+    <numAvailProps value="0" />
+    <aPropMetaData itemType="CPedPropMetaData" />
+    <aAnchors itemType="CAnchorProps" />
+  </propInfo>
+  <dlcName>hash_7F16400D</dlcName>
+</CPedVariationInfo>

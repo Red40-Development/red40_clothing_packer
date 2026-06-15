@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ClothingRepacker.Cli/ClothingRepacker.Cli.csproj" />
+    <Project Path="src/ClothingRepacker.CodeWalker/ClothingRepacker.CodeWalker.csproj" />
+    <Project Path="src/ClothingRepacker.Core/ClothingRepacker.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ClothingRepacker.Tests/ClothingRepacker.Tests.csproj" />
+  </Folder>
+</Solution>
