@@ -11,6 +11,9 @@ It supports:
 - Applying the plan to your resources with backup metadata
 - Restoring everything from the backup manifest
 
+# [**Red40 Development**](https://red40.dev/scripts)
+Like this tool and want to support further development? Checkout our store [Red40 Development](https://red40.dev/scripts)
+
 ## Download and Install
 
 ### Option 1: Download built binaries
@@ -148,5 +151,7 @@ NOTE:
 - Prefer running `build` first so you can inspect output before modifying your real resources with `apply`
 
 ## Credits
+- Red40 Development (c) 2026
+- [dexyfex/CodeWalker](https://github.com/dexyfex/CodeWalker)
 
-This project uses code and file-format handling from [dexyfex/CodeWalker](https://github.com/dexyfex/CodeWalker). Credit and thanks to the CodeWalker project for making GTA V resource inspection and serialization work possible.
+This project uses code and file-format handling from CodeWalker. Credit and thanks to the CodeWalker project for making GTA V/FiveM resource inspection and serialization work possible.
