@@ -36,6 +36,36 @@ public class ShopMetaGenerationTests
         Assert.NotNull(xml.Root?.Element("pedProps"));
     }
 
+    [Fact]
+    public async Task BuildCanSkipPreviewXmlAndDebugClientArtifacts()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"shop-meta-build-options-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var resources = Path.Combine(root, "resources");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = false,
+            IncludeDebugClient = false,
+        });
+
+        var resourceRoot = Path.Combine(outputRoot, "zz_merged_clothing_meta");
+        var ymtPath = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_merged_f_001.ymt");
+        var previewXmlPath = ymtPath + ".xml";
+        var validationPath = Path.Combine(resourceRoot, "client", "validate_collections.lua");
+        var fxmanifestPath = Path.Combine(resourceRoot, "fxmanifest.lua");
+
+        Assert.True(File.Exists(ymtPath));
+        Assert.False(File.Exists(previewXmlPath));
+        Assert.False(File.Exists(validationPath));
+        Assert.DoesNotContain("client_script 'client/validate_collections.lua'", await File.ReadAllTextAsync(fxmanifestPath));
+    }
+
     [Theory]
     [InlineData("mp_f_freemode_01_mp_f_gang_flags.meta", "mp_f_freemode_01", "mp_f_gang_flags", "SCR_CHAR_MULTIPLAYER_F")]
     [InlineData("mp_m_freemode_01_mp_m_gang_flags.meta", "mp_m_freemode_01", "mp_m_gang_flags", "SCR_CHAR_MULTIPLAYER")]
