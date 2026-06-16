@@ -95,7 +95,12 @@ internal static class ProgramEntry
     {
         using var progressWriter = new ConsoleProgressWriter();
         var plan = await service.LoadPlanAsync(Required(options, "--plan"));
-        var result = await service.BuildAsync(plan, Required(options, "--out"), CreateConsoleProgress(progressWriter));
+        var buildOptions = new BuildOptions
+        {
+            IncludeYmtXml = ParseBool(options.GetValueOrDefault("--include-ymt-xml"), fallback: true),
+            IncludeDebugClient = ParseBool(options.GetValueOrDefault("--include-debug-client"), fallback: true),
+        };
+        var result = await service.BuildAsync(plan, Required(options, "--out"), buildOptions, CreateConsoleProgress(progressWriter));
         progressWriter.CompleteLine();
         Console.WriteLine($"Wrote {result.WrittenFiles.Count} file(s) to {result.OutputRoot}.");
         return 0;
@@ -171,6 +176,7 @@ internal static class ProgramEntry
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
 clothing-repacker build --plan <plan.json> --out <folder>
+  [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker apply --plan <plan.json> --backup-root <folder>
 clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
@@ -214,6 +220,9 @@ clothing-repacker export-xml --folder <path> [--overwrite]
 
     private static int? ParseNullableInt(string? value)
         => int.TryParse(value, out var parsed) ? parsed : null;
+
+    private static bool ParseBool(string? value, bool fallback)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
 
     private static IProgress<OperationProgress> CreateConsoleProgress(ConsoleProgressWriter writer)
         => new Progress<OperationProgress>(progress => writer.Write(FormatProgress(progress)));

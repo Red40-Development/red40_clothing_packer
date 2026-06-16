@@ -152,6 +152,12 @@ public sealed record AnalyzeResult(
     IReadOnlyList<SourceYmt> Sources,
     IReadOnlyList<StreamFile> StreamFiles);
 
+public sealed record BuildOptions
+{
+    public bool IncludeYmtXml { get; init; } = true;
+    public bool IncludeDebugClient { get; init; } = true;
+}
+
 public sealed record BuildResult(
     string OutputRoot,
     IReadOnlyList<string> WrittenFiles);

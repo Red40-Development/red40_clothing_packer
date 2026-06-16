@@ -201,8 +201,9 @@ public sealed class RepackerService
             ?? throw new InvalidDataException($"Could not read plan {planPath}.");
     }
 
-    public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
+    public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions? options = null, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        options ??= new BuildOptions();
         var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
         var writtenFiles = new List<string>();
         var fullOutputRoot = Path.GetFullPath(outputRoot);
@@ -233,9 +234,12 @@ public sealed class RepackerService
             await _codec.EncodeFromXmlAsync(xml, ymtOutputPath, cancellationToken);
             writtenFiles.Add(ymtOutputPath);
 
-            var previewXmlPath = ymtOutputPath + ".xml";
-            xml.Save(previewXmlPath);
-            writtenFiles.Add(previewXmlPath);
+            if (options.IncludeYmtXml)
+            {
+                var previewXmlPath = ymtOutputPath + ".xml";
+                xml.Save(previewXmlPath);
+                writtenFiles.Add(previewXmlPath);
+            }
 
             var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
@@ -255,13 +259,16 @@ public sealed class RepackerService
 
         var fxmanifestPath = Path.Combine(fullOutputRoot, plan.TargetResource, "fxmanifest.lua");
         Directory.CreateDirectory(Path.GetDirectoryName(fxmanifestPath)!);
-        await File.WriteAllTextAsync(fxmanifestPath, BuildFxManifest(plan), cancellationToken);
+        await File.WriteAllTextAsync(fxmanifestPath, BuildFxManifest(plan, options), cancellationToken);
         writtenFiles.Add(fxmanifestPath);
 
-        var validationPath = Path.Combine(fullOutputRoot, plan.TargetResource, "client", "validate_collections.lua");
-        Directory.CreateDirectory(Path.GetDirectoryName(validationPath)!);
-        await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
-        writtenFiles.Add(validationPath);
+        if (options.IncludeDebugClient)
+        {
+            var validationPath = Path.Combine(fullOutputRoot, plan.TargetResource, "client", "validate_collections.lua");
+            Directory.CreateDirectory(Path.GetDirectoryName(validationPath)!);
+            await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
+            writtenFiles.Add(validationPath);
+        }
 
         progress?.Report(new OperationProgress(
             "build",
@@ -366,7 +373,7 @@ public sealed class RepackerService
             "apply",
             "build-staging",
             Message: "Building generated resource into a staging folder."));
-        var buildResult = await BuildAsync(plan, stagingRoot, progress, cancellationToken);
+        var buildResult = await BuildAsync(plan, stagingRoot, options: null, progress, cancellationToken);
         var entries = new List<BackupEntry>();
 
         for (var index = 0; index < plan.StreamRenames.Count; index++)
@@ -568,7 +575,7 @@ public sealed class RepackerService
             _ => "SCR_CHAR_MULTIPLAYER",
         };
 
-    private static string BuildFxManifest(MergePlan plan)
+    private static string BuildFxManifest(MergePlan plan, BuildOptions options)
     {
         var dependencies = plan.SourceYmts.Select(source => source.Resource).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToList();
         var dataFiles = plan.TargetCollections
@@ -598,8 +605,12 @@ public sealed class RepackerService
         {
             sb.AppendLine(dataFile);
         }
-        sb.AppendLine();
-        sb.AppendLine("client_script 'client/validate_collections.lua'");
+        if (options.IncludeDebugClient)
+        {
+            sb.AppendLine();
+            sb.AppendLine("client_script 'client/validate_collections.lua'");
+        }
+
         return sb.ToString();
     }
 
