@@ -17,6 +17,7 @@ public sealed class RepackerService
 {
     private readonly ResourceScanner _scanner = new();
     private readonly PedVariationReader _reader = new();
+    private readonly CreatureMetadataReader _creatureMetadataReader = new();
     private readonly MergePlanner _mergePlanner = new();
     private readonly StreamRenamePlanner _streamRenamePlanner = new();
     private readonly PlanValidator _planValidator = new();
@@ -36,6 +37,7 @@ public sealed class RepackerService
     {
         var scanItems = _scanner.ScanResources(resourcesRoot);
         var sources = new List<SourceYmt>();
+        var creatureMetadata = new List<SourceCreatureMetadata>();
         var streamFiles = new List<StreamFile>();
         var warnings = new List<string>();
         var errors = new List<string>();
@@ -68,6 +70,12 @@ public sealed class RepackerService
             try
             {
                 var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
+                if (xml.Root?.Name.LocalName == "CCreatureMetaData")
+                {
+                    creatureMetadata.Add(_creatureMetadataReader.Read(xml, path, item.ResourceName, item.ResourceRoot));
+                    continue;
+                }
+
                 if (xml.Root?.Name.LocalName != "CPedVariationInfo")
                 {
                     continue;
@@ -181,11 +189,17 @@ public sealed class RepackerService
                 source.YmtPath,
                 Path.Combine("_clothing_repacker_backups", "{runId}", source.ResourceName, Path.GetRelativePath(source.ResourceRoot, source.YmtPath)).Replace(Path.DirectorySeparatorChar, '/'))).ToList(),
             SourceManifestWarnings = manifestWarnings,
+            SourceCreatureMetadata = creatureMetadata.Select(metadata => new SourceCreatureMetadataSummary(
+                metadata.ResourceName,
+                metadata.Path,
+                metadata.ShaderVariableComponents.Count,
+                metadata.ComponentExpressions.Count,
+                metadata.PropExpressions.Count)).ToList(),
             Warnings = warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             Errors = errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
         };
 
-        return new AnalyzeResult(plan, sources, streamFiles);
+        return new AnalyzeResult(plan, sources, streamFiles, creatureMetadata);
     }
 
     public async Task SavePlanAsync(MergePlan plan, string outputPath, CancellationToken cancellationToken = default)
@@ -205,6 +219,7 @@ public sealed class RepackerService
     {
         options ??= new BuildOptions();
         var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
+        var creatureMetadataByResource = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
         var writtenFiles = new List<string>();
         var fullOutputRoot = Path.GetFullPath(outputRoot);
         Directory.CreateDirectory(fullOutputRoot);
@@ -238,6 +253,19 @@ public sealed class RepackerService
             {
                 var previewXmlPath = ymtOutputPath + ".xml";
                 xml.Save(previewXmlPath);
+                writtenFiles.Add(previewXmlPath);
+            }
+
+            var creatureMetadataXml = BuildCreatureMetadataXml(plan, targetPlan, sources, creatureMetadataByResource);
+            var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, plan.TargetResource, "stream", $"MP_CreatureMetadata_{targetPlan.CollectionName}.ymt");
+            Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
+            await _codec.EncodeFromXmlAsync(creatureMetadataXml, creatureMetadataOutputPath, cancellationToken);
+            writtenFiles.Add(creatureMetadataOutputPath);
+
+            if (options.IncludeYmtXml)
+            {
+                var previewXmlPath = creatureMetadataOutputPath + ".xml";
+                creatureMetadataXml.Save(previewXmlPath);
                 writtenFiles.Add(previewXmlPath);
             }
 
@@ -515,6 +543,58 @@ public sealed class RepackerService
         }
 
         return result;
+    }
+
+    private async Task<Dictionary<string, List<SourceCreatureMetadata>>> ReloadCreatureMetadataForPlanAsync(MergePlan plan, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, List<SourceCreatureMetadata>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in plan.SourceCreatureMetadata)
+        {
+            var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
+            var metadata = _creatureMetadataReader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
+            if (!result.TryGetValue(metadata.ResourceName, out var resourceMetadata))
+            {
+                resourceMetadata = [];
+                result[metadata.ResourceName] = resourceMetadata;
+            }
+
+            resourceMetadata.Add(metadata);
+        }
+
+        return result;
+    }
+
+    private static XDocument BuildCreatureMetadataXml(
+        MergePlan plan,
+        TargetCollectionPlan targetPlan,
+        Dictionary<string, SourceYmt> sources,
+        Dictionary<string, List<SourceCreatureMetadata>> creatureMetadataByResource)
+    {
+        var builder = new CreatureMetadataBuilder();
+        foreach (var sourcePath in targetPlan.SourceYmts)
+        {
+            var source = sources[sourcePath];
+            if (!creatureMetadataByResource.TryGetValue(source.ResourceName, out var resourceCreatureMetadata))
+            {
+                continue;
+            }
+
+            var sourceDrawableMappings = plan.DrawableMappings
+                .Where(mapping => mapping.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)
+                                  && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var sourcePropMappings = plan.PropMappings
+                .Where(mapping => mapping.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)
+                                  && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var metadata in resourceCreatureMetadata)
+            {
+                builder.Add(metadata, sourceDrawableMappings, sourcePropMappings);
+            }
+        }
+
+        return builder.BuildXml();
     }
 
     private static bool IsLikelyPedVariationXml(string path)

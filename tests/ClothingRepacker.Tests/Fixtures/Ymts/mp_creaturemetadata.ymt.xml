@@ -1,0 +1,728 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CCreatureMetaData>
+ <shaderVariableComponents itemType="CShaderVariableComponent" />
+ <pedPropExpressions itemType="CPedPropExpressionData">
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="-1" />
+   <pedPropExpressionIndex value="4294967295" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="0" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="1" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="2" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="3" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="4" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="5" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="6" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="7" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="8" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="9" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="10" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="11" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="12" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="13" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="14" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="15" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="16" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="17" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="18" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="19" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="20" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="21" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="22" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="23" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="24" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="25" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="26" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="27" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="28" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="29" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="30" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="31" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="32" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="33" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="34" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="35" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="36" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="37" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="38" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="39" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="40" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="41" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="42" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="43" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="44" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="45" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="46" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="47" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="48" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedPropID value="0" />
+   <pedPropVarIndex value="49" />
+   <pedPropExpressionIndex value="0" />
+   <tracks>33</tracks>
+   <ids>13201</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+ </pedPropExpressions>
+ <pedCompExpressions itemType="CPedCompExpressionData">
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="0" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="1" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="2" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="3" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="4" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="5" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="6" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="7" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="8" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="9" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="10" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="11" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="12" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="13" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="14" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="15" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="16" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="17" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="18" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="19" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="20" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="21" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="22" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="23" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="24" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="25" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="26" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="27" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+  <Item>
+   <pedCompID value="6" />
+   <pedCompVarIndex value="28" />
+   <pedCompExpressionIndex value="4" />
+   <tracks>33</tracks>
+   <ids>28462</ids>
+   <types>2</types>
+   <components>1</components>
+  </Item>
+ </pedCompExpressions>
+</CCreatureMetaData>

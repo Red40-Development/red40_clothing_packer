@@ -25,6 +25,24 @@ public sealed record PropBlock(
     int AnchorId,
     IReadOnlyList<XElement> Props);
 
+public sealed record SourceCreatureMetadata(
+    string Path,
+    string ResourceName,
+    string ResourceRoot,
+    XDocument Xml,
+    IReadOnlyList<CreatureShaderVariableComponent> ShaderVariableComponents,
+    IReadOnlyList<CreatureExpression> ComponentExpressions,
+    IReadOnlyList<CreatureExpression> PropExpressions);
+
+public sealed record CreatureShaderVariableComponent(
+    int ComponentId,
+    XElement Element);
+
+public sealed record CreatureExpression(
+    int SlotId,
+    int VariationIndex,
+    XElement Element);
+
 public sealed record DrawableMapping(
     string SourceResource,
     string SourceYmtPath,
@@ -97,6 +115,13 @@ public sealed record SourceYmtSummary(
     Dictionary<int, int> Components,
     Dictionary<int, int> Props);
 
+public sealed record SourceCreatureMetadataSummary(
+    string Resource,
+    string Path,
+    int ShaderVariableComponentCount,
+    int ComponentExpressionCount,
+    int PropExpressionCount);
+
 public sealed record TargetCollectionPlan(
     string CollectionName,
     string FullCollectionName,
@@ -122,6 +147,7 @@ public sealed class MergePlan
     public List<SourceManifestWarning> SourceManifestWarnings { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
     public List<string> Errors { get; init; } = [];
+    public List<SourceCreatureMetadataSummary> SourceCreatureMetadata { get; init; } = [];
 }
 
 public sealed class MergePlanSettings
@@ -150,7 +176,8 @@ public enum ValidationSeverity
 public sealed record AnalyzeResult(
     MergePlan Plan,
     IReadOnlyList<SourceYmt> Sources,
-    IReadOnlyList<StreamFile> StreamFiles);
+    IReadOnlyList<StreamFile> StreamFiles,
+    IReadOnlyList<SourceCreatureMetadata> CreatureMetadata);
 
 public sealed record BuildOptions
 {
