@@ -29,7 +29,7 @@ public class AnalyzeTests
         var result = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
 
         Assert.Contains(result.Plan.Errors, error => error.Contains(invalidPath, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.Plan.Errors, error => error.Contains("Missing attribute 'name'", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Plan.Errors, error => error.Contains("Missing element 'availComp'", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

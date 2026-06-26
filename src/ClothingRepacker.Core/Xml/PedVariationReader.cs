@@ -15,9 +15,8 @@ public sealed class PedVariationReader
             throw new InvalidDataException($"Unexpected root '{root.Name}'.");
         }
 
-        var collectionName = RequiredAttribute(root, "name").Value;
         var dlcName = root.Element("dlcName")?.Value.Trim() ?? string.Empty;
-        var (pedBaseName, gender, fullCollectionName) = InferIdentity(ymtPath, collectionName);
+        var (pedBaseName, gender, collectionName, fullCollectionName) = InferIdentity(ymtPath, root.Attribute("name")?.Value);
 
         var availCompValues = ParseIntList(RequiredElement(root, "availComp").Value);
         if (availCompValues.Length != ClothingConstants.ComponentSlotCount)
@@ -132,7 +131,7 @@ public sealed class PedVariationReader
         return results;
     }
 
-    private static (string PedBaseName, PedGender Gender, string FullCollectionName) InferIdentity(string ymtPath, string collectionName)
+    private static (string PedBaseName, PedGender Gender, string CollectionName, string FullCollectionName) InferIdentity(string ymtPath, string? collectionName)
     {
         var filename = Path.GetFileName(ymtPath);
         if (filename.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase))
@@ -146,6 +145,12 @@ public sealed class PedVariationReader
         else if (filename.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase))
         {
             filename = filename[..^4];
+        }
+
+        collectionName = collectionName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(collectionName))
+        {
+            return InferNamelessIdentity(filename);
         }
 
         var pedBaseName = string.Empty;
@@ -173,7 +178,45 @@ public sealed class PedVariationReader
             fullCollectionName = $"{pedBaseName}_{collectionName}";
         }
 
-        return (pedBaseName, gender, fullCollectionName);
+        return (pedBaseName, gender, collectionName, fullCollectionName);
+    }
+
+    private static (string PedBaseName, PedGender Gender, string CollectionName, string FullCollectionName) InferNamelessIdentity(string filename)
+    {
+        if (TryInferFreemodeIdentity(filename, "mp_f_freemode_01", PedGender.Female, out var femaleIdentity))
+        {
+            return femaleIdentity;
+        }
+
+        if (TryInferFreemodeIdentity(filename, "mp_m_freemode_01", PedGender.Male, out var maleIdentity))
+        {
+            return maleIdentity;
+        }
+
+        return ("unknown_ped", PedGender.Unknown, filename, filename);
+    }
+
+    private static bool TryInferFreemodeIdentity(
+        string filename,
+        string pedBaseName,
+        PedGender gender,
+        out (string PedBaseName, PedGender Gender, string CollectionName, string FullCollectionName) identity)
+    {
+        if (filename.Equals(pedBaseName, StringComparison.OrdinalIgnoreCase))
+        {
+            identity = (pedBaseName, gender, string.Empty, filename);
+            return true;
+        }
+
+        var prefix = $"{pedBaseName}_";
+        if (filename.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            identity = (pedBaseName, gender, filename[prefix.Length..], filename);
+            return true;
+        }
+
+        identity = (string.Empty, PedGender.Unknown, string.Empty, string.Empty);
+        return false;
     }
 
     private static bool TryGetValue(XElement parent, string name, out int value)
