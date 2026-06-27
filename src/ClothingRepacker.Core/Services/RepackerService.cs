@@ -35,11 +35,6 @@ public sealed class RepackerService
 
     public async Task<AnalyzeResult> AnalyzeAsync(string resourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        if (!IsCreatureMetadataMode(settings.CreatureMetadataMode))
-        {
-            throw new InvalidOperationException("CreatureMetadataMode must be 'repair' or 'preserve'.");
-        }
-
         if (settings.MaxDrawablesPerComponent <= 0 || settings.MaxDrawablesPerProp <= 0)
         {
             throw new InvalidOperationException("Drawable limits must be greater than zero.");
@@ -704,10 +699,7 @@ public sealed class RepackerService
                 }
             }
 
-            if (IsRepairCreatureMetadataMode(plan.Settings.CreatureMetadataMode))
-            {
-                builder.AddRepairHints(source, sourceDrawableMappings, sourcePropMappings);
-            }
+            builder.AddRepairHints(source, sourceDrawableMappings, sourcePropMappings);
         }
 
         return builder.BuildXml();
@@ -765,13 +757,6 @@ public sealed class RepackerService
             .Select(reference => reference.Resource)
             .Any(resource => targetResources.Contains(resource));
     }
-
-    private static bool IsRepairCreatureMetadataMode(string mode)
-        => mode.Equals("repair", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsCreatureMetadataMode(string mode)
-        => mode.Equals("repair", StringComparison.OrdinalIgnoreCase)
-           || mode.Equals("preserve", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLikelyPedVariationXml(string path)
         => path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase)

@@ -312,34 +312,6 @@ public class CreatureMetadataTests
         Assert.Equal([0, 10], ReadValues(xml, "pedPropExpressions", "pedPropExpressionIndex"));
     }
 
-    [Fact]
-    public async Task BuildPreserveCreatureMetadataModeKeepsEmptyOutputWhenSourceMetadataIsMissing()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"preserve-creature-metadata-test-{Guid.NewGuid():N}");
-        var resources = Path.Combine(root, "resources");
-        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHighHeelSignal: true, includeHairScalePropSignal: true);
-
-        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
-        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings
-        {
-            CreatureMetadataMode = "preserve",
-        });
-        var outputRoot = Path.Combine(root, "out");
-
-        await service.BuildAsync(analyze.Plan, outputRoot);
-
-        var metadataPath = Path.Combine(
-            outputRoot,
-            "zz_merged_clothing_meta",
-            "stream",
-            "MP_CreatureMetadata_merged_f_001.ymt.xml");
-        var xml = XDocument.Load(metadataPath);
-
-        Assert.Equal("preserve", analyze.Plan.Settings.CreatureMetadataMode);
-        Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
-        Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
-    }
-
     private static void WriteResource(
         string resourcesRoot,
         string collectionName,

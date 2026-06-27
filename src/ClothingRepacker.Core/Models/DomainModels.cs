@@ -195,7 +195,6 @@ public sealed class MergePlanSettings
     public int MaxDrawablesPerComponent { get; init; } = ClothingConstants.DefaultMaxDrawablesPerComponent;
     public int MaxDrawablesPerProp { get; init; } = ClothingConstants.DefaultMaxDrawablesPerProp;
     public string ShopMetaMode { get; init; } = "complete";
-    public string CreatureMetadataMode { get; init; } = "repair";
     public bool RenameStreamsInPlace { get; init; } = true;
     public string FemalePrefix { get; init; } = "merged_f";
     public string MalePrefix { get; init; } = "merged_m";
