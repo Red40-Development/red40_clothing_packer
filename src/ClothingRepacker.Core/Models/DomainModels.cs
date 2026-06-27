@@ -141,6 +141,15 @@ public sealed record TargetCollectionPlan(
     Dictionary<int, int> ComponentCounts,
     Dictionary<int, int> PropCounts);
 
+public sealed record SourceFileCopyPlan(
+    string SourcePath,
+    string OutputPath);
+
+public sealed record StandaloneResourcePlan(
+    string SourceResource,
+    string OutputResource,
+    List<SourceFileCopyPlan> Files);
+
 public sealed class MergePlan
 {
     public int SchemaVersion { get; init; } = 1;
@@ -150,6 +159,7 @@ public sealed class MergePlan
     public MergePlanSettings Settings { get; init; } = new();
     public List<SourceYmtSummary> SourceYmts { get; init; } = [];
     public List<TargetCollectionPlan> TargetCollections { get; init; } = [];
+    public List<StandaloneResourcePlan> StandaloneResources { get; init; } = [];
     public List<DrawableMapping> DrawableMappings { get; init; } = [];
     public List<PropMapping> PropMappings { get; init; } = [];
     public List<StreamRename> StreamRenames { get; init; } = [];

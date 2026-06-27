@@ -110,7 +110,7 @@ public sealed class PedVariationReader
         var propInfo = root.Element("propInfo");
         if (propInfo is null)
         {
-            return [];
+            return ([], []);
         }
 
         var metadata = Items(propInfo.Element("aPropMetaData"));
@@ -148,7 +148,7 @@ public sealed class PedVariationReader
             results.Add(new PropBlock(group.Key, ordered));
         }
 
-        return results;
+        return (results, repairHints);
     }
 
     private static (string PedBaseName, PedGender Gender, string CollectionName, string FullCollectionName) InferIdentity(string ymtPath, string? collectionName)

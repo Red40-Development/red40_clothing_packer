@@ -119,7 +119,9 @@ public sealed class RepackerService
             WarningCount: warnings.Count,
             ErrorCount: errors.Count));
 
-        var targets = _mergePlanner.Plan(sources, settings, warnings, errors);
+        var mergeableSources = sources.Where(IsMergeableFreemodeSource).ToList();
+        var standaloneResources = BuildStandaloneResourcePlans(sources.Except(mergeableSources).ToList(), streamFiles, targetResource, warnings);
+        var targets = _mergePlanner.Plan(mergeableSources, settings, warnings, errors);
         var drawableMappings = new List<DrawableMapping>();
         var propMappings = new List<PropMapping>();
         var targetPlans = new List<TargetCollectionPlan>();
@@ -187,10 +189,11 @@ public sealed class RepackerService
                 source.Components.ToDictionary(component => component.ComponentId, component => component.Drawables.Count),
                 source.Props.ToDictionary(prop => prop.AnchorId, prop => prop.Props.Count))).ToList(),
             TargetCollections = targetPlans,
+            StandaloneResources = standaloneResources.ToList(),
             DrawableMappings = drawableMappings,
             PropMappings = propMappings,
             StreamRenames = streamRenames.ToList(),
-            OldYmtBackups = sources.Select(source => new OldYmtBackupPlan(
+            OldYmtBackups = mergeableSources.Select(source => new OldYmtBackupPlan(
                 source.YmtPath,
                 Path.Combine("_clothing_repacker_backups", "{runId}", source.ResourceName, Path.GetRelativePath(source.ResourceRoot, source.YmtPath)).Replace(Path.DirectorySeparatorChar, '/'))).ToList(),
             SourceManifestWarnings = manifestWarnings,
@@ -303,6 +306,23 @@ public sealed class RepackerService
             writtenFiles.Add(validationPath);
         }
 
+        foreach (var standaloneResource in plan.StandaloneResources)
+        {
+            var resourceRoot = Path.Combine(fullOutputRoot, standaloneResource.OutputResource);
+            foreach (var file in standaloneResource.Files)
+            {
+                var outputPath = Path.Combine(fullOutputRoot, file.OutputPath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                File.Copy(file.SourcePath, outputPath, overwrite: true);
+                writtenFiles.Add(outputPath);
+            }
+
+            var manifestPath = Path.Combine(resourceRoot, "fxmanifest.lua");
+            Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+            await File.WriteAllTextAsync(manifestPath, BuildStandaloneFxManifest(standaloneResource), cancellationToken);
+            writtenFiles.Add(manifestPath);
+        }
+
         progress?.Report(new OperationProgress(
             "build",
             "complete",
@@ -385,11 +405,16 @@ public sealed class RepackerService
 
     public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        var mergedSourceYmtPaths = plan.TargetCollections
+            .SelectMany(target => target.SourceYmts)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         progress?.Report(new OperationProgress(
             "apply",
             "start",
-            Total: plan.StreamRenames.Count + plan.SourceYmts.Count,
-            Message: $"Preparing to apply {plan.StreamRenames.Count} stream renames and {plan.SourceYmts.Count} YMT backups."));
+            Total: plan.StreamRenames.Count + mergedSourceYmtPaths.Count,
+            Message: $"Preparing to apply {plan.StreamRenames.Count} stream renames and {mergedSourceYmtPaths.Count} YMT backups."));
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -432,9 +457,13 @@ public sealed class RepackerService
                 BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
         }
 
-        for (var index = 0; index < plan.SourceYmts.Count; index++)
+        var mergedSources = plan.SourceYmts
+            .Where(source => mergedSourceYmtPaths.Contains(source.Path))
+            .ToList();
+
+        for (var index = 0; index < mergedSources.Count; index++)
         {
-            var source = plan.SourceYmts[index];
+            var source = mergedSources[index];
             if (!File.Exists(source.Path))
             {
                 continue;
@@ -451,7 +480,7 @@ public sealed class RepackerService
                 "apply",
                 "backup-source-ymt",
                 index + 1,
-                plan.SourceYmts.Count,
+                mergedSources.Count,
                 source.Path,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
                 BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
@@ -465,6 +494,18 @@ public sealed class RepackerService
 
         CopyDirectory(Path.Combine(buildResult.OutputRoot, plan.TargetResource), generatedRoot);
         entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
+
+        foreach (var standaloneResource in plan.StandaloneResources)
+        {
+            var standaloneGeneratedRoot = Path.Combine(Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot, standaloneResource.OutputResource);
+            if (Directory.Exists(standaloneGeneratedRoot))
+            {
+                Directory.Delete(standaloneGeneratedRoot, recursive: true);
+            }
+
+            CopyDirectory(Path.Combine(buildResult.OutputRoot, standaloneResource.OutputResource), standaloneGeneratedRoot);
+            entries.Add(new BackupEntry("generated-resource", standaloneGeneratedRoot, null, standaloneGeneratedRoot, string.Empty, null, DateTimeOffset.UtcNow));
+        }
 
         progress?.Report(new OperationProgress(
             "apply",
@@ -480,8 +521,8 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "complete",
-            plan.StreamRenames.Count + plan.SourceYmts.Count,
-            plan.StreamRenames.Count + plan.SourceYmts.Count,
+            plan.StreamRenames.Count + mergedSources.Count,
+            plan.StreamRenames.Count + mergedSources.Count,
             Message: $"Apply complete. Backup manifest written to {manifestPath}.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
             BackupCount: entries.Count(entry => entry.Kind == "old-ymt"),
@@ -590,11 +631,11 @@ public sealed class RepackerService
 
             if (creatureMetadataByResource.TryGetValue(source.ResourceName, out var resourceCreatureMetadata))
             {
-            foreach (var metadata in resourceCreatureMetadata)
-            {
-                builder.Add(metadata, sourceDrawableMappings, sourcePropMappings);
+                foreach (var metadata in resourceCreatureMetadata)
+                {
+                    builder.Add(metadata, sourceDrawableMappings, sourcePropMappings);
+                }
             }
-        }
 
             if (IsRepairCreatureMetadataMode(plan.Settings.CreatureMetadataMode))
             {
@@ -622,6 +663,63 @@ public sealed class RepackerService
         var match = Regex.Match(fullCollectionName, @"^(.*)_(merged_[fm]_\d+)$", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : fullCollectionName;
     }
+
+    private static bool IsMergeableFreemodeSource(SourceYmt source)
+        => source.Gender is PedGender.Female or PedGender.Male
+           && (source.PedBaseName.Equals("mp_f_freemode_01", StringComparison.OrdinalIgnoreCase)
+               || source.PedBaseName.Equals("mp_m_freemode_01", StringComparison.OrdinalIgnoreCase));
+
+    private static IReadOnlyList<StandaloneResourcePlan> BuildStandaloneResourcePlans(
+        IReadOnlyList<SourceYmt> sources,
+        IReadOnlyList<StreamFile> streamFiles,
+        string targetResource,
+        List<string> warnings)
+    {
+        var plans = new List<StandaloneResourcePlan>();
+        foreach (var resourceGroup in sources.GroupBy(source => (source.ResourceName, source.ResourceRoot)))
+        {
+            var outputResource = $"{targetResource}_standalone_{SanitizeResourceName(resourceGroup.Key.ResourceName)}";
+            var files = new Dictionary<string, SourceFileCopyPlan>(StringComparer.OrdinalIgnoreCase);
+            foreach (var source in resourceGroup)
+            {
+                warnings.Add($"Non-freemode YMT will be copied unchanged into standalone resource '{outputResource}': {source.YmtPath}");
+                AddStandaloneFile(files, source.ResourceRoot, source.YmtPath, outputResource);
+
+                foreach (var streamFile in streamFiles.Where(file =>
+                             file.ResourceRoot.Equals(source.ResourceRoot, StringComparison.OrdinalIgnoreCase)
+                             && IsRelatedStandaloneStreamFile(file, source)))
+                {
+                    AddStandaloneFile(files, source.ResourceRoot, streamFile.FullPath, outputResource);
+                }
+            }
+
+            plans.Add(new StandaloneResourcePlan(
+                resourceGroup.Key.ResourceName,
+                outputResource,
+                files.Values.OrderBy(file => file.OutputPath, StringComparer.OrdinalIgnoreCase).ToList()));
+        }
+
+        return plans;
+    }
+
+    private static void AddStandaloneFile(Dictionary<string, SourceFileCopyPlan> files, string sourceRoot, string sourcePath, string outputResource)
+    {
+        var relativePath = Path.GetRelativePath(sourceRoot, sourcePath).Replace(Path.DirectorySeparatorChar, '/');
+        files[sourcePath] = new SourceFileCopyPlan(sourcePath, $"{outputResource}/{relativePath}");
+    }
+
+    private static bool IsRelatedStandaloneStreamFile(StreamFile file, SourceYmt source)
+    {
+        if (file.FullPath.Equals(source.YmtPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return file.FileName.StartsWith($"{source.FullCollectionName}^", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string SanitizeResourceName(string resourceName)
+        => Regex.Replace(resourceName, @"[^A-Za-z0-9_]+", "_");
 
     private static IEnumerable<SourceManifestWarning> ReadManifestWarnings(ResourceScanItem item)
     {
@@ -706,6 +804,18 @@ public sealed class RepackerService
             sb.AppendLine("client_script 'client/validate_collections.lua'");
         }
 
+        return sb.ToString();
+    }
+
+    private static string BuildStandaloneFxManifest(StandaloneResourcePlan plan)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("fx_version 'cerulean'");
+        sb.AppendLine("game 'gta5'");
+        sb.AppendLine();
+        sb.AppendLine("author 'Red40 ClothingRepacker'");
+        sb.AppendLine($"description 'Unmodified non-freemode clothing files copied from {plan.SourceResource}'");
+        sb.AppendLine("version '1.0.0'");
         return sb.ToString();
     }
 

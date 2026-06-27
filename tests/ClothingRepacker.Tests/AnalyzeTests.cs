@@ -2,6 +2,7 @@ using ClothingRepacker.CodeWalker;
 using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
+using System.Xml.Linq;
 
 namespace ClothingRepacker.Tests;
 
@@ -55,4 +56,41 @@ public class AnalyzeTests
         Assert.Equal(result.Plan.Errors.Count, completed.ErrorCount);
         Assert.Equal(result.Plan.Warnings.Count, completed.WarningCount);
     }
+
+    [Fact]
+    public async Task AnalyzeAndBuildCopyNonFreemodePedsIntoStandaloneResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"non-freemode-standalone-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var streamRoot = Path.Combine(resources, "animal_pack", "stream");
+        Directory.CreateDirectory(streamRoot);
+
+        var ymtPath = Path.Combine(streamRoot, "a_c_horse_01_horse_pack.ymt.xml");
+        var drawablePath = Path.Combine(streamRoot, "a_c_horse_01_horse_pack^uppr_000_u.ydd");
+        BuildMinimalPedVariationXml("horse_pack").Save(ymtPath);
+        await File.WriteAllTextAsync(drawablePath, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        var build = await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var standalone = Assert.Single(analyze.Plan.StandaloneResources);
+        Assert.Empty(analyze.Plan.TargetCollections);
+        Assert.Equal("zz_merged_clothing_meta_standalone_animal_pack", standalone.OutputResource);
+        Assert.Contains(standalone.Files, file => file.SourcePath == ymtPath);
+        Assert.Contains(standalone.Files, file => file.SourcePath == drawablePath);
+        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack.ymt.xml", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack^uppr_000_u.ydd", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static XDocument BuildMinimalPedVariationXml(string collectionName)
+        => new(
+            new XElement("CPedVariationInfo",
+                new XAttribute("name", collectionName),
+                new XElement("availComp", "255 255 255 255 255 255 255 255 255 255 255 255"),
+                new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
+                new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
+                new XElement("dlcName", "hash_00000000")));
 }
