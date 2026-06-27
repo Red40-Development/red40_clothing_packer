@@ -78,6 +78,11 @@ internal static class ProgramEntry
         await service.SavePlanAsync(result.Plan, outPath);
         Console.WriteLine($"Analyzed {result.Plan.SourceYmts.Count} YMTs into {result.Plan.TargetCollections.Count} target collections.");
         Console.WriteLine($"Warnings: {result.Plan.Warnings.Count}. Errors: {result.Plan.Errors.Count}. Planned stream renames: {result.Plan.StreamRenames.Count}.");
+        foreach (var warning in result.Plan.Warnings)
+        {
+            Console.Error.WriteLine(warning);
+        }
+
         if (result.Plan.Errors.Count > 0)
         {
             foreach (var error in result.Plan.Errors)
