@@ -26,15 +26,28 @@ public sealed class OutputCollectionBuilder
     public PedGender Gender { get; }
 
     public IReadOnlyList<DrawableMapping> AddComponents(SourceYmt source)
+        => AddComponents(
+            source,
+            source.Components.ToDictionary(
+                component => component.ComponentId,
+                component => new SourceIndexRange(source.YmtPath, component.ComponentId, 0, component.Drawables.Count)));
+
+    public IReadOnlyList<DrawableMapping> AddComponents(SourceYmt source, IReadOnlyDictionary<int, SourceIndexRange> componentRanges)
     {
         var mappings = new List<DrawableMapping>();
         foreach (var component in source.Components.OrderBy(c => c.ComponentId))
         {
+            if (!componentRanges.TryGetValue(component.ComponentId, out var range) || range.Count <= 0)
+            {
+                continue;
+            }
+
             var targetDrawables = GetOrCreate(_componentDrawables, component.ComponentId);
             var targetInfos = GetOrCreate(_componentInfos, component.ComponentId);
             var targetOffset = targetDrawables.Count;
+            var rangeEnd = Math.Min(range.StartIndex + range.Count, component.Drawables.Count);
 
-            for (var index = 0; index < component.Drawables.Count; index++)
+            for (var index = range.StartIndex; index < rangeEnd; index++)
             {
                 targetDrawables.Add(new XElement(component.Drawables[index]));
                 mappings.Add(new DrawableMapping(
@@ -47,7 +60,7 @@ public sealed class OutputCollectionBuilder
                     PedBaseName,
                     component.ComponentId,
                     index,
-                    targetOffset + index));
+                    targetOffset + index - range.StartIndex));
             }
 
             foreach (var compInfo in component.CompInfos)
@@ -55,7 +68,13 @@ public sealed class OutputCollectionBuilder
                 var clone = new XElement(compInfo);
                 if (clone.Element("pedXml_drawblIdx") is { } drawblIdx)
                 {
-                    SetValueAttr(drawblIdx, ValueAttr(drawblIdx) + targetOffset);
+                    var sourceDrawableIndex = ValueAttr(drawblIdx);
+                    if (sourceDrawableIndex < range.StartIndex || sourceDrawableIndex >= rangeEnd)
+                    {
+                        continue;
+                    }
+
+                    SetValueAttr(drawblIdx, targetOffset + sourceDrawableIndex - range.StartIndex);
                 }
 
                 targetInfos.Add(clone);
@@ -66,14 +85,31 @@ public sealed class OutputCollectionBuilder
     }
 
     public IReadOnlyList<PropMapping> AddProps(SourceYmt source)
+        => AddProps(
+            source,
+            source.Props.ToDictionary(
+                prop => prop.AnchorId,
+                prop => new SourceIndexRange(source.YmtPath, prop.AnchorId, 0, prop.Props.Count)));
+
+    public IReadOnlyList<PropMapping> AddProps(SourceYmt source, IReadOnlyDictionary<int, SourceIndexRange> propRanges)
     {
         var mappings = new List<PropMapping>();
         foreach (var prop in source.Props.OrderBy(p => p.AnchorId))
         {
+            if (!propRanges.TryGetValue(prop.AnchorId, out var range) || range.Count <= 0)
+            {
+                continue;
+            }
+
             var targetProps = GetOrCreate(_props, prop.AnchorId);
             var targetOffset = targetProps.Count;
             var ordered = prop.Props
                 .OrderBy(item => ValueAttr(RequiredElement(item, "propId")))
+                .Where(item =>
+                {
+                    var propId = ValueAttr(RequiredElement(item, "propId"));
+                    return propId >= range.StartIndex && propId < range.StartIndex + range.Count;
+                })
                 .ToList();
 
             for (var ordinal = 0; ordinal < ordered.Count; ordinal++)

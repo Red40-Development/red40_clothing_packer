@@ -134,6 +134,12 @@ public sealed record SourceYmtSummary(
     Dictionary<int, int> Components,
     Dictionary<int, int> Props);
 
+public sealed record SourceIndexRange(
+    string SourceYmtPath,
+    int SlotId,
+    int StartIndex,
+    int Count);
+
 public sealed record SourceCreatureMetadataSummary(
     string Resource,
     string Path,
@@ -147,6 +153,8 @@ public sealed record TargetCollectionPlan(
     PedGender Gender,
     string OutputYmtPath,
     List<string> SourceYmts,
+    List<SourceIndexRange> ComponentRanges,
+    List<SourceIndexRange> PropRanges,
     Dictionary<int, int> ComponentCounts,
     Dictionary<int, int> PropCounts);
 

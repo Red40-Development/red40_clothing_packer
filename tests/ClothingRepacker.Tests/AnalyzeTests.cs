@@ -85,12 +85,68 @@ public class AnalyzeTests
         Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack^uppr_000_u.ydd", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task AnalyzeAndBuildSplitOversizedFreemodeYmtIntoMergedOutputs()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"oversized-freemode-split-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var streamRoot = Path.Combine(resources, "oversized_pack", "stream");
+        Directory.CreateDirectory(streamRoot);
+
+        var ymtPath = Path.Combine(streamRoot, "mp_f_freemode_01_oversized_pack.ymt.xml");
+        BuildPedVariationXmlWithDrawables("oversized_pack", drawableCount: 129).Save(ymtPath);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 128,
+        });
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        Assert.Empty(analyze.Plan.Errors);
+        Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("will be split across 2 target collections", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(2, analyze.Plan.TargetCollections.Count);
+        Assert.Equal([128, 1], analyze.Plan.TargetCollections
+            .OrderBy(target => target.CollectionName)
+            .Select(target => target.ComponentCounts[0])
+            .ToArray());
+        Assert.Equal([128, 1], analyze.Plan.TargetCollections
+            .OrderBy(target => target.CollectionName)
+            .Select(target => target.ComponentRanges.Single().Count)
+            .ToArray());
+
+        var firstXml = XDocument.Load(Path.Combine(outputRoot, "zz_merged_clothing_meta", "stream", "mp_f_freemode_01_merged_f_001.ymt.xml"));
+        var secondXml = XDocument.Load(Path.Combine(outputRoot, "zz_merged_clothing_meta", "stream", "mp_f_freemode_01_merged_f_002.ymt.xml"));
+
+        Assert.Equal(128, firstXml.Root!.Element("aComponentData3")!.Element("Item")!.Element("aDrawblData3")!.Elements("Item").Count());
+        Assert.Single(secondXml.Root!.Element("aComponentData3")!.Element("Item")!.Element("aDrawblData3")!.Elements("Item"));
+    }
+
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
         => new(
             new XElement("CPedVariationInfo",
                 new XAttribute("name", collectionName),
                 new XElement("availComp", "255 255 255 255 255 255 255 255 255 255 255 255"),
                 new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
+                new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
+                new XElement("dlcName", "hash_00000000")));
+
+    private static XDocument BuildPedVariationXmlWithDrawables(string collectionName, int drawableCount)
+        => new(
+            new XElement("CPedVariationInfo",
+                new XAttribute("name", collectionName),
+                new XElement("availComp", "0 255 255 255 255 255 255 255 255 255 255 255"),
+                new XElement("aComponentData3",
+                    new XAttribute("itemType", "CPVComponentData"),
+                    new XElement("Item",
+                        new XElement("numAvailTex", new XAttribute("value", drawableCount)),
+                        new XElement("aDrawblData3",
+                            new XAttribute("itemType", "CPVDrawblData"),
+                            Enumerable.Range(0, drawableCount).Select(_ =>
+                                new XElement("Item",
+                                    new XElement("aTexData", new XAttribute("itemType", "CPVTextureData"))))))),
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
                 new XElement("dlcName", "hash_00000000")));
 }

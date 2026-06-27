@@ -12,22 +12,23 @@ public sealed class OutputCollectionCapacity
     public Dictionary<int, int> ComponentCounts { get; } = [];
     public Dictionary<int, int> PropCounts { get; } = [];
     public List<SourceYmt> Sources { get; } = [];
+    public List<SourceYmtContribution> Contributions { get; } = [];
 
-    public bool CanFit(SourceYmt source, int maxDrawablesPerComponent, int maxDrawablesPerProp)
+    public bool CanFit(SourceYmtContribution contribution, int maxDrawablesPerComponent, int maxDrawablesPerProp)
     {
-        foreach (var component in source.Components)
+        foreach (var component in contribution.ComponentRanges)
         {
-            var current = ComponentCounts.GetValueOrDefault(component.ComponentId);
-            if (current + component.Drawables.Count > maxDrawablesPerComponent)
+            var current = ComponentCounts.GetValueOrDefault(component.Key);
+            if (current + component.Value.Count > maxDrawablesPerComponent)
             {
                 return false;
             }
         }
 
-        foreach (var prop in source.Props)
+        foreach (var prop in contribution.PropRanges)
         {
-            var current = PropCounts.GetValueOrDefault(prop.AnchorId);
-            if (current + prop.Props.Count > maxDrawablesPerProp)
+            var current = PropCounts.GetValueOrDefault(prop.Key);
+            if (current + prop.Value.Count > maxDrawablesPerProp)
             {
                 return false;
             }
@@ -36,17 +37,22 @@ public sealed class OutputCollectionCapacity
         return true;
     }
 
-    public void Add(SourceYmt source)
+    public void Add(SourceYmtContribution contribution)
     {
-        Sources.Add(source);
-        foreach (var component in source.Components)
+        Contributions.Add(contribution);
+        if (!Sources.Contains(contribution.Source))
         {
-            ComponentCounts[component.ComponentId] = ComponentCounts.GetValueOrDefault(component.ComponentId) + component.Drawables.Count;
+            Sources.Add(contribution.Source);
         }
 
-        foreach (var prop in source.Props)
+        foreach (var component in contribution.ComponentRanges)
         {
-            PropCounts[prop.AnchorId] = PropCounts.GetValueOrDefault(prop.AnchorId) + prop.Props.Count;
+            ComponentCounts[component.Key] = ComponentCounts.GetValueOrDefault(component.Key) + component.Value.Count;
+        }
+
+        foreach (var prop in contribution.PropRanges)
+        {
+            PropCounts[prop.Key] = PropCounts.GetValueOrDefault(prop.Key) + prop.Value.Count;
         }
     }
 }

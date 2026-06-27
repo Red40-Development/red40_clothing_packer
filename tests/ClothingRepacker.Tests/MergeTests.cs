@@ -48,14 +48,24 @@ public class MergeTests
 
         var outputs = planner.Plan([componentOverflow, propAtLimit, propOverflow], settings, warnings, errors);
 
-        var output = Assert.Single(outputs);
-        Assert.Contains(propAtLimit, output.Sources);
-        Assert.DoesNotContain(componentOverflow, output.Sources);
-        Assert.DoesNotContain(propOverflow, output.Sources);
-        Assert.Equal(255, output.PropCounts[0]);
-        Assert.Equal(2, errors.Count);
-        Assert.Contains(errors, error => error.Contains("component-overflow", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(errors, error => error.Contains("prop-overflow", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(errors);
+        Assert.Equal(2, warnings.Count);
+        Assert.Contains(outputs, output => output.Sources.Contains(componentOverflow));
+        Assert.Contains(outputs, output => output.Sources.Contains(propAtLimit));
+        Assert.Contains(outputs, output => output.Sources.Contains(propOverflow));
+        Assert.All(outputs, output =>
+        {
+            Assert.All(output.ComponentCounts.Values, count => Assert.InRange(count, 0, settings.MaxDrawablesPerComponent));
+            Assert.All(output.PropCounts.Values, count => Assert.InRange(count, 0, settings.MaxDrawablesPerProp));
+        });
+        Assert.Equal(129, outputs.Sum(output => output.Contributions
+            .Where(contribution => contribution.Source == componentOverflow)
+            .SelectMany(contribution => contribution.ComponentRanges.Values)
+            .Sum(range => range.Count)));
+        Assert.Equal(256, outputs.Sum(output => output.Contributions
+            .Where(contribution => contribution.Source == propOverflow)
+            .SelectMany(contribution => contribution.PropRanges.Values)
+            .Sum(range => range.Count)));
     }
 
     private static SourceYmt CreateSourceYmt(string pathSuffix, int componentDrawableCount, int propCount)

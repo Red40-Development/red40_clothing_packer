@@ -40,6 +40,11 @@ public sealed class RepackerService
             throw new InvalidOperationException("CreatureMetadataMode must be 'repair' or 'preserve'.");
         }
 
+        if (settings.MaxDrawablesPerComponent <= 0 || settings.MaxDrawablesPerProp <= 0)
+        {
+            throw new InvalidOperationException("Drawable limits must be greater than zero.");
+        }
+
         var scanItems = _scanner.ScanResources(resourcesRoot);
         var sources = new List<SourceYmt>();
         var creatureMetadata = new List<SourceCreatureMetadata>();
@@ -146,10 +151,10 @@ public sealed class RepackerService
         {
             var target = targets[index];
             var builder = new OutputCollectionBuilder(target.CollectionName, target.FullCollectionName, target.PedBaseName, target.Gender);
-            foreach (var source in target.Sources)
+            foreach (var contribution in target.Contributions)
             {
-                drawableMappings.AddRange(builder.AddComponents(source));
-                propMappings.AddRange(builder.AddProps(source));
+                drawableMappings.AddRange(builder.AddComponents(contribution.Source, contribution.ComponentRanges));
+                propMappings.AddRange(builder.AddProps(contribution.Source, contribution.PropRanges));
             }
 
             var outputYmtPath = Path.Combine(targetResource, "stream", $"{target.FullCollectionName}.ymt");
@@ -159,6 +164,18 @@ public sealed class RepackerService
                 target.Gender,
                 outputYmtPath.Replace(Path.DirectorySeparatorChar, '/'),
                 target.Sources.Select(source => source.YmtPath).ToList(),
+                target.Contributions
+                    .SelectMany(contribution => contribution.ComponentRanges.Values)
+                    .OrderBy(range => range.SourceYmtPath, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(range => range.SlotId)
+                    .ThenBy(range => range.StartIndex)
+                    .ToList(),
+                target.Contributions
+                    .SelectMany(contribution => contribution.PropRanges.Values)
+                    .OrderBy(range => range.SourceYmtPath, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(range => range.SlotId)
+                    .ThenBy(range => range.StartIndex)
+                    .ToList(),
                 builder.GetComponentCounts(),
                 builder.GetPropCounts()));
 
@@ -267,8 +284,8 @@ public sealed class RepackerService
             foreach (var sourcePath in targetPlan.SourceYmts)
             {
                 var source = sources[sourcePath];
-                builder.AddComponents(source);
-                builder.AddProps(source);
+                builder.AddComponents(source, GetComponentRanges(targetPlan, source));
+                builder.AddProps(source, GetPropRanges(targetPlan, source));
             }
 
             var xml = builder.BuildXml();
@@ -288,17 +305,17 @@ public sealed class RepackerService
             var includeCreatureMetadata = !TargetHasUnavailableCreatureMetadata(plan, targetPlan);
             if (includeCreatureMetadata)
             {
-            var creatureMetadataXml = BuildCreatureMetadataXml(plan, targetPlan, sources, creatureMetadataByResource);
-            var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, plan.TargetResource, "stream", $"MP_CreatureMetadata_{targetPlan.CollectionName}.ymt");
-            Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
-            await _codec.EncodeFromXmlAsync(creatureMetadataXml, creatureMetadataOutputPath, cancellationToken);
-            writtenFiles.Add(creatureMetadataOutputPath);
+                var creatureMetadataXml = BuildCreatureMetadataXml(plan, targetPlan, sources, creatureMetadataByResource);
+                var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, plan.TargetResource, "stream", $"MP_CreatureMetadata_{targetPlan.CollectionName}.ymt");
+                Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
+                await _codec.EncodeFromXmlAsync(creatureMetadataXml, creatureMetadataOutputPath, cancellationToken);
+                writtenFiles.Add(creatureMetadataOutputPath);
 
-            if (options.IncludeYmtXml)
-            {
-                var previewXmlPath = creatureMetadataOutputPath + ".xml";
-                creatureMetadataXml.Save(previewXmlPath);
-                writtenFiles.Add(previewXmlPath);
+                if (options.IncludeYmtXml)
+                {
+                    var previewXmlPath = creatureMetadataOutputPath + ".xml";
+                    creatureMetadataXml.Save(previewXmlPath);
+                    writtenFiles.Add(previewXmlPath);
                 }
             }
 
@@ -694,6 +711,34 @@ public sealed class RepackerService
         }
 
         return builder.BuildXml();
+    }
+
+    private static IReadOnlyDictionary<int, SourceIndexRange> GetComponentRanges(TargetCollectionPlan targetPlan, SourceYmt source)
+    {
+        if (targetPlan.ComponentRanges.Count == 0)
+        {
+            return source.Components.ToDictionary(
+                component => component.ComponentId,
+                component => new SourceIndexRange(source.YmtPath, component.ComponentId, 0, component.Drawables.Count));
+        }
+
+        return targetPlan.ComponentRanges
+            .Where(range => range.SourceYmtPath.Equals(source.YmtPath, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(range => range.SlotId, range => range);
+    }
+
+    private static IReadOnlyDictionary<int, SourceIndexRange> GetPropRanges(TargetCollectionPlan targetPlan, SourceYmt source)
+    {
+        if (targetPlan.PropRanges.Count == 0)
+        {
+            return source.Props.ToDictionary(
+                prop => prop.AnchorId,
+                prop => new SourceIndexRange(source.YmtPath, prop.AnchorId, 0, prop.Props.Count));
+        }
+
+        return targetPlan.PropRanges
+            .Where(range => range.SourceYmtPath.Equals(source.YmtPath, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(range => range.SlotId, range => range);
     }
 
     private static bool TargetHasUnavailableCreatureMetadata(MergePlan plan, TargetCollectionPlan targetPlan)
