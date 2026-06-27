@@ -48,6 +48,7 @@ If you are running from source, use `dotnet run --project src/ClothingRepacker.C
 ```bash
 ClothingRepacker.Cli analyze --resources <path> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--creature-metadata-mode <repair|preserve>]
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
@@ -107,6 +108,8 @@ The two optional `build` toggles both default to `true`:
 
 - `--include-ymt-xml false` skips writing the preview `stream/*.ymt.xml` files
 - `--include-debug-client false` skips generating `client/validate_collections.lua` and removes its `client_script` line from `fxmanifest.lua`
+
+`--creature-metadata-mode repair` is the default during `analyze`. It preserves and remaps source creature metadata, then fills known missing high-heel and hair-scale entries from the source YMT expression data. Use `--creature-metadata-mode preserve` to keep only source creature metadata without synthesized repair entries.
 
 Apply the plan to your actual resource set:
 

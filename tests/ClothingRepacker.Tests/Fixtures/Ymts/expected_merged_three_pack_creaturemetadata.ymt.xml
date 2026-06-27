@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CCreatureMetaData>
+  <shaderVariableComponents itemType="CShaderVariableComponent">
+    <Item>
+      <pedcompID value="6" />
+      <maskID value="1" />
+      <shaderVariableHashString value="1234" />
+      <tracks>33</tracks>
+      <ids>28462</ids>
+      <components>1</components>
+    </Item>
+  </shaderVariableComponents>
+  <pedPropExpressions itemType="CPedPropExpressionData">
+    <Item>
+      <pedPropID value="0" />
+      <pedPropVarIndex value="-1" />
+      <pedPropExpressionIndex value="0" />
+      <tracks>33</tracks>
+      <ids>13201</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+    <Item>
+      <pedPropID value="0" />
+      <pedPropVarIndex value="0" />
+      <pedPropExpressionIndex value="9" />
+      <tracks>33</tracks>
+      <ids>13201</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+    <Item>
+      <pedPropID value="0" />
+      <pedPropVarIndex value="1" />
+      <pedPropExpressionIndex value="10" />
+      <tracks>33</tracks>
+      <ids>13201</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+    <Item>
+      <pedPropID value="0" />
+      <pedPropVarIndex value="2" />
+      <pedPropExpressionIndex value="11" />
+      <tracks>33</tracks>
+      <ids>13201</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+  </pedPropExpressions>
+  <pedCompExpressions itemType="CPedCompExpressionData">
+    <Item>
+      <pedCompID value="6" />
+      <pedCompVarIndex value="0" />
+      <pedCompExpressionIndex value="4" />
+      <tracks>33</tracks>
+      <ids>28462</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+    <Item>
+      <pedCompID value="6" />
+      <pedCompVarIndex value="1" />
+      <pedCompExpressionIndex value="8" />
+      <tracks>33</tracks>
+      <ids>28462</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+    <Item>
+      <pedCompID value="6" />
+      <pedCompVarIndex value="2" />
+      <pedCompExpressionIndex value="12" />
+      <tracks>33</tracks>
+      <ids>28462</ids>
+      <types>2</types>
+      <components>1</components>
+    </Item>
+  </pedCompExpressions>
+</CCreatureMetaData>

@@ -70,6 +70,7 @@ internal static class ProgramEntry
                 options.GetValueOrDefault("--max-drawables-per-prop"),
                 legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerProp),
             ShopMetaMode = options.GetValueOrDefault("--shop-meta-mode") ?? "minimal",
+            CreatureMetadataMode = options.GetValueOrDefault("--creature-metadata-mode") ?? "repair",
         };
 
         var result = await service.AnalyzeAsync(resources, targetResource, settings, CreateConsoleProgress(progressWriter));
@@ -175,6 +176,7 @@ internal static class ProgramEntry
         Console.WriteLine("""
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--creature-metadata-mode <repair|preserve>]
 clothing-repacker build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker apply --plan <plan.json> --backup-root <folder>

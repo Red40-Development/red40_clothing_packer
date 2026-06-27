@@ -1,4 +1,5 @@
 using ClothingRepacker.Core.Models;
+using System.Globalization;
 using System.Xml.Linq;
 using static ClothingRepacker.Core.Xml.XmlHelpers;
 
@@ -27,6 +28,7 @@ public sealed class PedVariationReader
         var componentData = Items(RequiredElement(root, "aComponentData3"));
         var compInfos = Items(RequiredElement(root, "compInfos"));
         var components = new List<ComponentBlock>();
+        var componentRepairHints = new List<CreatureComponentRepairHint>();
 
         for (var componentId = 0; componentId < Math.Min(availCompValues.Length, ClothingConstants.ComponentSlotCount); componentId++)
         {
@@ -74,12 +76,18 @@ public sealed class PedVariationReader
                 {
                     messages.Add(new(ValidationSeverity.Error, "compInfo-range", $"Component {componentId} compInfo drawable index {drawblIdx} is out of range."));
                 }
+                else if (componentId == 6
+                         && TryGetFloatArrayValue(compInfo, "pedXml_expressionMods", 4, out var highHeelExpression)
+                         && highHeelExpression != 0)
+                {
+                    componentRepairHints.Add(new CreatureComponentRepairHint(componentId, drawblIdx));
+                }
             }
 
             components.Add(new ComponentBlock(componentId, drawables, componentInfos));
         }
 
-        var props = ReadProps(root, messages);
+        var (props, propRepairHints) = ReadProps(root, messages);
         return new SourceYmt(
             ymtPath,
             resourceName,
@@ -92,10 +100,12 @@ public sealed class PedVariationReader
             xml,
             components,
             props,
+            componentRepairHints,
+            propRepairHints,
             messages);
     }
 
-    private static IReadOnlyList<PropBlock> ReadProps(XElement root, List<ValidationMessage> messages)
+    private static (IReadOnlyList<PropBlock> Props, IReadOnlyList<CreaturePropRepairHint> RepairHints) ReadProps(XElement root, List<ValidationMessage> messages)
     {
         var propInfo = root.Element("propInfo");
         if (propInfo is null)
@@ -104,6 +114,16 @@ public sealed class PedVariationReader
         }
 
         var metadata = Items(propInfo.Element("aPropMetaData"));
+        var repairHints = metadata
+            .Where(item => TryGetValue(item, "anchorId", out var anchorId)
+                           && anchorId == 0
+                           && TryGetValue(item, "propId", out var propId)
+                           && propId >= 0
+                           && TryGetFloatArrayValue(item, "expressionMods", 0, out var hairScaleExpression)
+                           && hairScaleExpression != 0)
+            .Select(item => new CreaturePropRepairHint(GetValue(item, "anchorId"), GetValue(item, "propId")))
+            .ToList();
+
         var grouped = metadata
             .Select((item, index) => new
             {
@@ -229,5 +249,34 @@ public sealed class PedVariationReader
         }
 
         return int.TryParse(attribute.Value, out value);
+    }
+
+    private static int GetValue(XElement item, string name)
+        => ValueAttr(RequiredElement(item, name));
+
+    private static bool TryGetFloatArrayValue(XElement parent, string name, int index, out double value)
+    {
+        value = 0;
+        var element = parent.Element(name);
+        if (element is null)
+        {
+            return false;
+        }
+
+        var child = element.Element($"f{index}");
+        if (child?.Attribute("value") is { } childAttribute)
+        {
+            return double.TryParse(childAttribute.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        if (element.Attribute("value") is { } valueAttribute)
+        {
+            return double.TryParse(valueAttribute.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        var values = element.Value.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries);
+        return index >= 0
+               && index < values.Length
+               && double.TryParse(values[index], NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 }

@@ -91,6 +91,8 @@ public class MergeTests
             Xml: xml,
             Components: components,
             Props: props,
+            CreatureComponentRepairHints: Array.Empty<CreatureComponentRepairHint>(),
+            CreaturePropRepairHints: Array.Empty<CreaturePropRepairHint>(),
             Messages: Array.Empty<ValidationMessage>());
     }
 }

@@ -14,6 +14,8 @@ public sealed record SourceYmt(
     XDocument Xml,
     IReadOnlyList<ComponentBlock> Components,
     IReadOnlyList<PropBlock> Props,
+    IReadOnlyList<CreatureComponentRepairHint> CreatureComponentRepairHints,
+    IReadOnlyList<CreaturePropRepairHint> CreaturePropRepairHints,
     IReadOnlyList<ValidationMessage> Messages);
 
 public sealed record ComponentBlock(
@@ -24,6 +26,14 @@ public sealed record ComponentBlock(
 public sealed record PropBlock(
     int AnchorId,
     IReadOnlyList<XElement> Props);
+
+public sealed record CreatureComponentRepairHint(
+    int ComponentId,
+    int DrawableIndex);
+
+public sealed record CreaturePropRepairHint(
+    int AnchorId,
+    int PropIndex);
 
 public sealed record SourceCreatureMetadata(
     string Path,
@@ -156,6 +166,7 @@ public sealed class MergePlanSettings
     public int MaxDrawablesPerComponent { get; init; } = ClothingConstants.DefaultMaxDrawablesPerComponent;
     public int MaxDrawablesPerProp { get; init; } = ClothingConstants.DefaultMaxDrawablesPerProp;
     public string ShopMetaMode { get; init; } = "minimal";
+    public string CreatureMetadataMode { get; init; } = "repair";
     public bool RenameStreamsInPlace { get; init; } = true;
     public string FemalePrefix { get; init; } = "merged_f";
     public string MalePrefix { get; init; } = "merged_m";

@@ -35,6 +35,11 @@ public sealed class RepackerService
 
     public async Task<AnalyzeResult> AnalyzeAsync(string resourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
+        if (!IsCreatureMetadataMode(settings.CreatureMetadataMode))
+        {
+            throw new InvalidOperationException("CreatureMetadataMode must be 'repair' or 'preserve'.");
+        }
+
         var scanItems = _scanner.ScanResources(resourcesRoot);
         var sources = new List<SourceYmt>();
         var creatureMetadata = new List<SourceCreatureMetadata>();
@@ -574,11 +579,6 @@ public sealed class RepackerService
         foreach (var sourcePath in targetPlan.SourceYmts)
         {
             var source = sources[sourcePath];
-            if (!creatureMetadataByResource.TryGetValue(source.ResourceName, out var resourceCreatureMetadata))
-            {
-                continue;
-            }
-
             var sourceDrawableMappings = plan.DrawableMappings
                 .Where(mapping => mapping.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)
                                   && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
@@ -588,14 +588,29 @@ public sealed class RepackerService
                                   && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
+            if (creatureMetadataByResource.TryGetValue(source.ResourceName, out var resourceCreatureMetadata))
+            {
             foreach (var metadata in resourceCreatureMetadata)
             {
                 builder.Add(metadata, sourceDrawableMappings, sourcePropMappings);
             }
         }
 
+            if (IsRepairCreatureMetadataMode(plan.Settings.CreatureMetadataMode))
+            {
+                builder.AddRepairHints(source, sourceDrawableMappings, sourcePropMappings);
+            }
+        }
+
         return builder.BuildXml();
     }
+
+    private static bool IsRepairCreatureMetadataMode(string mode)
+        => mode.Equals("repair", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCreatureMetadataMode(string mode)
+        => mode.Equals("repair", StringComparison.OrdinalIgnoreCase)
+           || mode.Equals("preserve", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsLikelyPedVariationXml(string path)
         => path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase)

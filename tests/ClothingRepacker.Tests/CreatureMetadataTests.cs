@@ -9,6 +9,68 @@ namespace ClothingRepacker.Tests;
 public class CreatureMetadataTests
 {
     [Fact]
+    public async Task BuildPreservesBaseCreatureMetadataForFemaleAndMaleFreemodeFixtures()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"base-creature-metadata-fixture-test-{Guid.NewGuid():N}");
+        var stream = Path.Combine(root, "resources", "base_pack", "stream");
+        Directory.CreateDirectory(stream);
+        File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01.ymt.xml"), Path.Combine(stream, "mp_f_freemode_01.ymt.xml"));
+        File.Copy(TestFixturePaths.Ymt("mp_m_freemode_01.ymt.xml"), Path.Combine(stream, "mp_m_freemode_01.ymt.xml"));
+        File.Copy(TestFixturePaths.Ymt("mp_creaturemetadata.ymt.xml"), Path.Combine(stream, "mp_creaturemetadata.ymt.xml"));
+
+        var resources = Path.Combine(root, "resources");
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var expected = XDocument.Load(TestFixturePaths.Ymt("mp_creaturemetadata.ymt.xml"));
+        var femaleMetadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var maleMetadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_m_001.ymt.xml");
+
+        Assert.Equal(2, analyze.Plan.SourceYmts.Count);
+        Assert.Single(analyze.Plan.SourceCreatureMetadata);
+        Assert.Equal(2, analyze.Plan.TargetCollections.Count);
+        AssertXmlEqual(expected, XDocument.Load(femaleMetadataPath));
+        AssertXmlEqual(expected, XDocument.Load(maleMetadataPath));
+    }
+
+    [Fact]
+    public async Task BuildMergesThreeCreatureMetadataFilesIntoExpectedFixture()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"creature-metadata-fixture-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9);
+        WriteResource(resources, "pack_b", componentExpressionIndex: 8, propExpressionIndex: 10);
+        WriteResource(resources, "pack_c", componentExpressionIndex: 12, propExpressionIndex: 11);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var expectedPath = TestFixturePaths.Ymt("expected_merged_three_pack_creaturemetadata.ymt.xml");
+
+        Assert.Equal(3, analyze.Plan.SourceCreatureMetadata.Count);
+        AssertXmlEqual(XDocument.Load(expectedPath), XDocument.Load(metadataPath));
+    }
+
+    [Fact]
     public async Task BuildRecreatesCreatureMetadataWithRemappedIndexes()
     {
         var root = Path.Combine(Path.GetTempPath(), $"creature-metadata-test-{Guid.NewGuid():N}");
@@ -65,18 +127,134 @@ public class CreatureMetadataTests
         Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
     }
 
-    private static void WriteResource(string resourcesRoot, string collectionName, int componentExpressionIndex, int propExpressionIndex, bool includeCreatureMetadata = true)
+    [Fact]
+    public async Task BuildRepairsHighHeelCreatureMetadataWhenSourceMetadataIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"high-heel-repair-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHighHeelSignal: true);
+        WriteResource(resources, "pack_b", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHighHeelSignal: true);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var xml = XDocument.Load(metadataPath);
+
+        Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        Assert.Equal([0, 1], ReadValues(xml, "pedCompExpressions", "pedCompVarIndex"));
+        Assert.Equal([4, 4], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
+        Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
+    }
+
+    [Fact]
+    public async Task BuildRepairsHairScalePropCreatureMetadataWhenSourceMetadataIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"hair-scale-repair-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHairScalePropSignal: true);
+        WriteResource(resources, "pack_b", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHairScalePropSignal: true);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var xml = XDocument.Load(metadataPath);
+
+        Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
+        Assert.Equal([-1, 0, 1], ReadValues(xml, "pedPropExpressions", "pedPropVarIndex"));
+        Assert.Equal(["4294967295", "0", "0"], ReadValueStrings(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+    }
+
+    [Fact]
+    public async Task BuildDoesNotDuplicateRepairedCreatureMetadataWhenSourceMetadataExists()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"creature-repair-dedupe-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 8, propExpressionIndex: 10, includeHighHeelSignal: true, includeHairScalePropSignal: true);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var xml = XDocument.Load(metadataPath);
+
+        Assert.Single(analyze.Plan.SourceCreatureMetadata);
+        Assert.Equal([0], ReadValues(xml, "pedCompExpressions", "pedCompVarIndex"));
+        Assert.Equal([8], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
+        Assert.Equal([-1, 0], ReadValues(xml, "pedPropExpressions", "pedPropVarIndex"));
+        Assert.Equal([0, 10], ReadValues(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+    }
+
+    [Fact]
+    public async Task BuildPreserveCreatureMetadataModeKeepsEmptyOutputWhenSourceMetadataIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"preserve-creature-metadata-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false, includeHighHeelSignal: true, includeHairScalePropSignal: true);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings
+        {
+            CreatureMetadataMode = "preserve",
+        });
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var xml = XDocument.Load(metadataPath);
+
+        Assert.Equal("preserve", analyze.Plan.Settings.CreatureMetadataMode);
+        Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
+        Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
+    }
+
+    private static void WriteResource(
+        string resourcesRoot,
+        string collectionName,
+        int componentExpressionIndex,
+        int propExpressionIndex,
+        bool includeCreatureMetadata = true,
+        bool includeHighHeelSignal = false,
+        bool includeHairScalePropSignal = false)
     {
         var stream = Path.Combine(resourcesRoot, collectionName, "stream");
         Directory.CreateDirectory(stream);
-        new XDocument(BuildPedVariation(collectionName)).Save(Path.Combine(stream, $"mp_f_freemode_01_{collectionName}.ymt.xml"));
+        new XDocument(BuildPedVariation(collectionName, includeHighHeelSignal, includeHairScalePropSignal)).Save(Path.Combine(stream, $"mp_f_freemode_01_{collectionName}.ymt.xml"));
         if (includeCreatureMetadata)
         {
             new XDocument(BuildCreatureMetadata(componentExpressionIndex, propExpressionIndex)).Save(Path.Combine(stream, "mp_creaturemetadata.ymt.xml"));
         }
     }
 
-    private static XElement BuildPedVariation(string collectionName)
+    private static XElement BuildPedVariation(string collectionName, bool includeHighHeelSignal, bool includeHairScalePropSignal)
         => new("CPedVariationInfo",
             new XAttribute("name", collectionName),
             new XElement("availComp", "255 255 255 255 255 255 0 255 255 255 255 255"),
@@ -88,7 +266,14 @@ public class CreatureMetadataTests
                         new XAttribute("itemType", "CPVDrawblData"),
                         new XElement("Item",
                             new XElement("aTexData", new XAttribute("itemType", "CPVTextureData")))))),
-            new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
+            new XElement("compInfos",
+                new XAttribute("itemType", "CComponentInfo"),
+                includeHighHeelSignal
+                    ? new XElement("Item",
+                        new XElement("pedXml_compIdx", new XAttribute("value", 6)),
+                        new XElement("pedXml_drawblIdx", new XAttribute("value", 0)),
+                        new XElement("pedXml_expressionMods", "0 0 0 0 1"))
+                    : null),
             new XElement("propInfo",
                 new XElement("numAvailProps", new XAttribute("value", 1)),
                 new XElement("aPropMetaData",
@@ -96,6 +281,7 @@ public class CreatureMetadataTests
                     new XElement("Item",
                         new XElement("anchorId", new XAttribute("value", 0)),
                         new XElement("propId", new XAttribute("value", 0)),
+                        includeHairScalePropSignal ? new XElement("expressionMods", "1 0 0 0 0") : null,
                         new XElement("aTexData", new XAttribute("itemType", "CPVTextureData")))),
                 new XElement("aAnchors", new XAttribute("itemType", "CAnchorProps"))),
             new XElement("dlcName", "hash_00000000"));
@@ -143,4 +329,16 @@ public class CreatureMetadataTests
         => xml.Root!.Element(containerName)!.Elements("Item")
             .Select(item => int.Parse(item.Element(valueElementName)!.Attribute("value")!.Value))
             .ToArray();
+
+    private static string[] ReadValueStrings(XDocument xml, string containerName, string valueElementName)
+        => xml.Root!.Element(containerName)!.Elements("Item")
+            .Select(item => item.Element(valueElementName)!.Attribute("value")!.Value)
+            .ToArray();
+
+    private static void AssertXmlEqual(XDocument expected, XDocument actual)
+    {
+        Assert.Equal(
+            expected.ToString(SaveOptions.DisableFormatting),
+            actual.ToString(SaveOptions.DisableFormatting));
+    }
 }
