@@ -60,7 +60,8 @@ public sealed class RepackerService
                 manifestWarnings.AddRange(ReadManifestWarnings(item));
             }
 
-            foreach (var path in item.YmtFiles.Where(IsLikelyPedVariationXml))
+            var ymtFiles = await FilterDuplicateXmlSidecarsAsync(item.YmtFiles, cancellationToken);
+            foreach (var path in ymtFiles.Where(IsLikelyPedVariationXml))
             {
                 workItems.Add((item, path));
             }
@@ -762,6 +763,83 @@ public sealed class RepackerService
         => path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<IReadOnlyList<string>> FilterDuplicateXmlSidecarsAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken)
+    {
+        var pathSet = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var skippedXmlPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var path in paths.Where(path => path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)))
+        {
+            var ymtPath = GetMatchingYmtPath(path);
+            if (ymtPath is null || !pathSet.Contains(ymtPath) || !File.Exists(ymtPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
+                var ymtXml = await _codec.DecodeToXmlAsync(ymtPath, cancellationToken);
+                if (XmlDocumentsMatch(xml, ymtXml))
+                {
+                    skippedXmlPaths.Add(path);
+                }
+            }
+            catch
+            {
+                // Keep both files in the work list so normal analysis can report the real decode/parse error.
+            }
+        }
+
+        return paths.Where(path => !skippedXmlPaths.Contains(path)).ToList();
+    }
+
+    private static string? GetMatchingYmtPath(string xmlPath)
+    {
+        if (xmlPath.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return xmlPath[..^".xml".Length];
+        }
+
+        if (!xmlPath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return Path.Combine(
+            Path.GetDirectoryName(xmlPath) ?? string.Empty,
+            $"{Path.GetFileNameWithoutExtension(xmlPath)}.ymt");
+    }
+
+    private static bool XmlDocumentsMatch(XDocument left, XDocument right)
+    {
+        if (left.Root is null || right.Root is null)
+        {
+            return left.Root is null && right.Root is null;
+        }
+
+        return XNode.DeepEquals(NormalizeXml(left.Root), NormalizeXml(right.Root));
+    }
+
+    private static XElement NormalizeXml(XElement element)
+        => new(
+            element.Name,
+            element.Attributes()
+                .OrderBy(attribute => attribute.Name.NamespaceName, StringComparer.Ordinal)
+                .ThenBy(attribute => attribute.Name.LocalName, StringComparer.Ordinal)
+                .Select(attribute => new XAttribute(attribute.Name, attribute.Value)),
+            element.Nodes().Select(NormalizeXmlNode).Where(node => node is not null)!);
+
+    private static XNode? NormalizeXmlNode(XNode node)
+        => node switch
+        {
+            XElement element => NormalizeXml(element),
+            XCData cdata => new XCData(cdata.Value.Trim()),
+            XText text when string.IsNullOrWhiteSpace(text.Value) => null,
+            XText text => new XText(text.Value.Trim()),
+            _ => null,
+        };
 
     private static IReadOnlyList<ShopCreatureMetadataReference> ReadShopCreatureMetadataReferences(IReadOnlyList<string> shopMetaFiles)
     {

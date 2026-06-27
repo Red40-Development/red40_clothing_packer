@@ -58,6 +58,26 @@ public class AnalyzeTests
     }
 
     [Fact]
+    public async Task AnalyzeSkipsXmlSidecarWhenMatchingYmtIsIdentical()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"analyze-skip-duplicate-xml-test-{Guid.NewGuid():N}");
+        var streamRoot = Path.Combine(root, "resources", "gang_flags", "stream");
+        Directory.CreateDirectory(streamRoot);
+
+        var ymtPath = Path.Combine(streamRoot, "mp_f_freemode_01_mp_f_gang_flags.ymt");
+        var xmlPath = ymtPath + ".xml";
+        File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01_mp_f_gang_flags.ymt"), ymtPath);
+        File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01_mp_f_gang_flags.ymt.xml"), xmlPath);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var result = await service.AnalyzeAsync(Path.Combine(root, "resources"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var source = Assert.Single(result.Plan.SourceYmts);
+        Assert.Equal(ymtPath, source.Path);
+        Assert.DoesNotContain(result.Plan.SourceYmts, source => source.Path.Equals(xmlPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task AnalyzeAndBuildCopyNonFreemodePedsIntoStandaloneResource()
     {
         var root = Path.Combine(Path.GetTempPath(), $"non-freemode-standalone-test-{Guid.NewGuid():N}");
