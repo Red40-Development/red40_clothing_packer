@@ -73,6 +73,33 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack", "stream", "a_c_horse_01_horse_pack^uppr_000_u.ydd")));
     }
 
+    [Fact]
+    public async Task ApplyBacksUpBrokenCreatureMetadataWithoutHandlingIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"broken-creature-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var stream = Path.Combine(resources, "broken_pack", "stream");
+        Directory.CreateDirectory(stream);
+
+        var creatureMetadataPath = Path.Combine(stream, "mp_creaturemetadata.ymt.xml");
+        BuildMinimalCreatureMetadataXml().Save(creatureMetadataPath);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"));
+
+        Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        Assert.Single(analyze.Plan.BrokenCreatureMetadataBackups);
+        Assert.False(File.Exists(creatureMetadataPath));
+        Assert.Contains(entries, entry => entry.Kind == "broken-creature-metadata" && entry.OriginalPath == creatureMetadataPath && entry.BackupPath is not null && File.Exists(entry.BackupPath));
+
+        var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        await service.RestoreAsync(manifest);
+
+        Assert.True(File.Exists(creatureMetadataPath));
+    }
+
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
         => new(
             new XElement("CPedVariationInfo",
@@ -81,4 +108,11 @@ public class ApplyRestoreTests
                 new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
                 new XElement("dlcName", "hash_00000000")));
+
+    private static XDocument BuildMinimalCreatureMetadataXml()
+        => new(
+            new XElement("CCreatureMetaData",
+                new XElement("shaderVariableComponents", new XAttribute("itemType", "CShaderVariableComponent")),
+                new XElement("pedPropExpressions", new XAttribute("itemType", "CPedPropExpressionData")),
+                new XElement("pedCompExpressions", new XAttribute("itemType", "CPedCompExpressionData"))));
 }

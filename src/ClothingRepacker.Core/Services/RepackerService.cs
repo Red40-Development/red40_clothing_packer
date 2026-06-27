@@ -43,14 +43,17 @@ public sealed class RepackerService
         var scanItems = _scanner.ScanResources(resourcesRoot);
         var sources = new List<SourceYmt>();
         var creatureMetadata = new List<SourceCreatureMetadata>();
+        var brokenCreatureMetadata = new List<SourceCreatureMetadata>();
         var streamFiles = new List<StreamFile>();
         var warnings = new List<string>();
         var errors = new List<string>();
         var manifestWarnings = new List<SourceManifestWarning>();
         var workItems = new List<(ResourceScanItem Item, string Path)>();
+        var creatureMetadataReferencesByResource = new Dictionary<string, IReadOnlyList<ShopCreatureMetadataReference>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in scanItems)
         {
+            creatureMetadataReferencesByResource[item.ResourceName] = ReadShopCreatureMetadataReferences(item.ShopMetaFiles);
             streamFiles.AddRange(item.StreamFiles);
             if (item.ManifestPath is not null)
             {
@@ -77,7 +80,15 @@ public sealed class RepackerService
                 var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
                 if (xml.Root?.Name.LocalName == "CCreatureMetaData")
                 {
-                    creatureMetadata.Add(_creatureMetadataReader.Read(xml, path, item.ResourceName, item.ResourceRoot));
+                    var metadata = _creatureMetadataReader.Read(xml, path, item.ResourceName, item.ResourceRoot);
+                    if (!HasCorrespondingShopMetadata(metadata, creatureMetadataReferencesByResource[item.ResourceName]))
+                    {
+                        brokenCreatureMetadata.Add(metadata);
+                        warnings.Add($"{path}: Creature metadata has no corresponding ShopPedApparel creatureMetaData reference and will be backed up without being merged.");
+                        continue;
+                    }
+
+                    creatureMetadata.Add(metadata);
                     continue;
                 }
 
@@ -107,6 +118,12 @@ public sealed class RepackerService
                     WarningCount: warnings.Count,
                     ErrorCount: errors.Count));
             }
+        }
+
+        var missingCreatureMetadataReferences = FindMissingCreatureMetadataReferences(creatureMetadataReferencesByResource, creatureMetadata, brokenCreatureMetadata);
+        foreach (var reference in missingCreatureMetadataReferences)
+        {
+            warnings.Add($"{reference.ShopMetaPath}: ShopPedApparel creatureMetaData references missing creature metadata '{reference.Reference}' and generated creature metadata will be omitted for merged targets from resource '{reference.Resource}'.");
         }
 
         progress?.Report(new OperationProgress(
@@ -196,6 +213,10 @@ public sealed class RepackerService
             OldYmtBackups = mergeableSources.Select(source => new OldYmtBackupPlan(
                 source.YmtPath,
                 Path.Combine("_clothing_repacker_backups", "{runId}", source.ResourceName, Path.GetRelativePath(source.ResourceRoot, source.YmtPath)).Replace(Path.DirectorySeparatorChar, '/'))).ToList(),
+            BrokenCreatureMetadataBackups = brokenCreatureMetadata.Select(metadata => new BrokenCreatureMetadataBackupPlan(
+                metadata.Path,
+                Path.Combine(metadata.ResourceName, Path.GetRelativePath(metadata.ResourceRoot, metadata.Path)).Replace(Path.DirectorySeparatorChar, '/'))).ToList(),
+            MissingCreatureMetadataReferences = missingCreatureMetadataReferences,
             SourceManifestWarnings = manifestWarnings,
             SourceCreatureMetadata = creatureMetadata.Select(metadata => new SourceCreatureMetadataSummary(
                 metadata.ResourceName,
@@ -264,6 +285,9 @@ public sealed class RepackerService
                 writtenFiles.Add(previewXmlPath);
             }
 
+            var includeCreatureMetadata = !TargetHasUnavailableCreatureMetadata(plan, targetPlan);
+            if (includeCreatureMetadata)
+            {
             var creatureMetadataXml = BuildCreatureMetadataXml(plan, targetPlan, sources, creatureMetadataByResource);
             var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, plan.TargetResource, "stream", $"MP_CreatureMetadata_{targetPlan.CollectionName}.ymt");
             Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
@@ -275,11 +299,12 @@ public sealed class RepackerService
                 var previewXmlPath = creatureMetadataOutputPath + ".xml";
                 creatureMetadataXml.Save(previewXmlPath);
                 writtenFiles.Add(previewXmlPath);
+                }
             }
 
             var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-            BuildShopMeta(targetPlan, xml).Save(metaPath);
+            BuildShopMeta(targetPlan, xml, includeCreatureMetadata).Save(metaPath);
             writtenFiles.Add(metaPath);
 
             progress?.Report(new OperationProgress(
@@ -413,8 +438,8 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "start",
-            Total: plan.StreamRenames.Count + mergedSourceYmtPaths.Count,
-            Message: $"Preparing to apply {plan.StreamRenames.Count} stream renames and {mergedSourceYmtPaths.Count} YMT backups."));
+            Total: plan.StreamRenames.Count + mergedSourceYmtPaths.Count + plan.BrokenCreatureMetadataBackups.Count,
+            Message: $"Preparing to apply {plan.StreamRenames.Count} stream renames, {mergedSourceYmtPaths.Count} YMT backups, and {plan.BrokenCreatureMetadataBackups.Count} broken creature metadata backups."));
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -454,7 +479,7 @@ public sealed class RepackerService
                 plan.StreamRenames.Count,
                 rename.TargetPath,
                 RenameCount: index + 1,
-                BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
+                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
         }
 
         var mergedSources = plan.SourceYmts
@@ -483,7 +508,32 @@ public sealed class RepackerService
                 mergedSources.Count,
                 source.Path,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(entry => entry.Kind == "old-ymt")));
+                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
+        }
+
+        for (var index = 0; index < plan.BrokenCreatureMetadataBackups.Count; index++)
+        {
+            var source = plan.BrokenCreatureMetadataBackups[index];
+            if (!File.Exists(source.SourcePath))
+            {
+                continue;
+            }
+
+            var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+            File.Copy(source.SourcePath, backupPath, overwrite: true);
+            var beforeHash = ComputeSha256(source.SourcePath);
+            File.Delete(source.SourcePath);
+            entries.Add(new BackupEntry("broken-creature-metadata", source.SourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+
+            progress?.Report(new OperationProgress(
+                "apply",
+                "backup-source-ymt",
+                mergedSources.Count + index + 1,
+                mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
+                source.SourcePath,
+                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
         }
 
         var generatedRoot = Path.Combine(Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot, plan.TargetResource);
@@ -512,7 +562,7 @@ public sealed class RepackerService
             "copy-generated-resource",
             Message: $"Copied generated resource to {generatedRoot}.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(entry => entry.Kind == "old-ymt"),
+            BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"),
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
         var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
@@ -521,11 +571,11 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "complete",
-            plan.StreamRenames.Count + mergedSources.Count,
-            plan.StreamRenames.Count + mergedSources.Count,
+            plan.StreamRenames.Count + mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
+            plan.StreamRenames.Count + mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
             Message: $"Apply complete. Backup manifest written to {manifestPath}.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(entry => entry.Kind == "old-ymt"),
+            BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"),
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
         return entries;
@@ -545,7 +595,7 @@ public sealed class RepackerService
             }
         }
 
-        foreach (var entry in entries.Where(entry => entry.Kind == "old-ymt"))
+        foreach (var entry in entries.Where(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"))
         {
             if (entry.BackupPath is null)
             {
@@ -646,6 +696,31 @@ public sealed class RepackerService
         return builder.BuildXml();
     }
 
+    private static bool TargetHasUnavailableCreatureMetadata(MergePlan plan, TargetCollectionPlan targetPlan)
+    {
+        if (plan.BrokenCreatureMetadataBackups.Count == 0
+            && plan.MissingCreatureMetadataReferences.Count == 0)
+        {
+            return false;
+        }
+
+        var targetResources = plan.SourceYmts
+            .Where(source => targetPlan.SourceYmts.Contains(source.Path, StringComparer.OrdinalIgnoreCase))
+            .Select(source => source.Resource)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (plan.BrokenCreatureMetadataBackups
+            .Select(backup => backup.BackupPath.Split('/')[0])
+            .Any(resource => targetResources.Contains(resource)))
+        {
+            return true;
+        }
+
+        return plan.MissingCreatureMetadataReferences
+            .Select(reference => reference.Resource)
+            .Any(resource => targetResources.Contains(resource));
+    }
+
     private static bool IsRepairCreatureMetadataMode(string mode)
         => mode.Equals("repair", StringComparison.OrdinalIgnoreCase);
 
@@ -657,6 +732,88 @@ public sealed class RepackerService
         => path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<ShopCreatureMetadataReference> ReadShopCreatureMetadataReferences(IReadOnlyList<string> shopMetaFiles)
+    {
+        var result = new List<ShopCreatureMetadataReference>();
+        foreach (var path in shopMetaFiles)
+        {
+            try
+            {
+                var xml = XDocument.Load(path);
+                if (xml.Root?.Name.LocalName != "ShopPedApparel")
+                {
+                    continue;
+                }
+
+                var reference = xml.Root.Element("creatureMetaData")?.Value.Trim();
+                if (!string.IsNullOrWhiteSpace(reference))
+                {
+                    result.Add(new ShopCreatureMetadataReference(path, reference, NormalizeCreatureMetadataName(reference)));
+                }
+            }
+            catch
+            {
+                // Non-XML files can share these extensions in source resources; ignore them unless they decode as ShopPedApparel.
+            }
+        }
+
+        return result;
+    }
+
+    private static bool HasCorrespondingShopMetadata(SourceCreatureMetadata metadata, IReadOnlyList<ShopCreatureMetadataReference> creatureMetadataReferences)
+        => creatureMetadataReferences.Any(reference => reference.NormalizedName.Equals(NormalizeCreatureMetadataName(metadata.Path), StringComparison.OrdinalIgnoreCase));
+
+    private static List<MissingCreatureMetadataReference> FindMissingCreatureMetadataReferences(
+        Dictionary<string, IReadOnlyList<ShopCreatureMetadataReference>> creatureMetadataReferencesByResource,
+        IReadOnlyList<SourceCreatureMetadata> creatureMetadata,
+        IReadOnlyList<SourceCreatureMetadata> brokenCreatureMetadata)
+    {
+        var availableNamesByResource = creatureMetadata
+            .Concat(brokenCreatureMetadata)
+            .GroupBy(metadata => metadata.ResourceName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(metadata => NormalizeCreatureMetadataName(metadata.Path)).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase);
+
+        var missing = new List<MissingCreatureMetadataReference>();
+        foreach (var (resource, references) in creatureMetadataReferencesByResource)
+        {
+            availableNamesByResource.TryGetValue(resource, out var availableNames);
+            foreach (var reference in references)
+            {
+                if (availableNames is not null && availableNames.Contains(reference.NormalizedName))
+                {
+                    continue;
+                }
+
+                missing.Add(new MissingCreatureMetadataReference(resource, reference.ShopMetaPath, reference.Reference));
+            }
+        }
+
+        return missing
+            .DistinctBy(reference => (reference.Resource.ToUpperInvariant(), reference.ShopMetaPath.ToUpperInvariant(), reference.Reference.ToUpperInvariant()))
+            .ToList();
+    }
+
+    private sealed record ShopCreatureMetadataReference(
+        string ShopMetaPath,
+        string Reference,
+        string NormalizedName);
+
+    private static string NormalizeCreatureMetadataName(string value)
+    {
+        var name = Path.GetFileName(value.Trim().Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
+        while (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+               || name.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase)
+               || name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+        {
+            name = Path.GetFileNameWithoutExtension(name);
+        }
+
+        return name;
+    }
 
     private static string InferPedBaseName(string fullCollectionName)
     {
@@ -742,7 +899,7 @@ public sealed class RepackerService
         }
     }
 
-    private static XDocument BuildShopMeta(TargetCollectionPlan plan, XDocument pedVariationXml)
+    private static XDocument BuildShopMeta(TargetCollectionPlan plan, XDocument pedVariationXml, bool includeCreatureMetadata = true)
         => new(
             new XDeclaration("1.0", "utf-8", null),
             new XElement("ShopPedApparel",
@@ -750,7 +907,7 @@ public sealed class RepackerService
                 new XElement("dlcName", plan.CollectionName),
                 new XElement("fullDlcName", plan.FullCollectionName),
                 new XElement("eCharacter", GetCharacterName(plan.Gender)),
-                new XElement("creatureMetaData", $"MP_CreatureMetadata_{plan.CollectionName}"),
+                includeCreatureMetadata ? new XElement("creatureMetaData", $"MP_CreatureMetadata_{plan.CollectionName}") : null,
                 new XElement("pedOutfits", new XAttribute("itemType", "ShopPedOutfit")),
                 new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml)),
                 new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml))));

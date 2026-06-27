@@ -107,6 +107,15 @@ public sealed record OldYmtBackupPlan(
     string SourcePath,
     string BackupPath);
 
+public sealed record BrokenCreatureMetadataBackupPlan(
+    string SourcePath,
+    string BackupPath);
+
+public sealed record MissingCreatureMetadataReference(
+    string Resource,
+    string ShopMetaPath,
+    string Reference);
+
 public sealed record SourceManifestWarning(
     string Resource,
     string ManifestPath,
@@ -164,6 +173,8 @@ public sealed class MergePlan
     public List<PropMapping> PropMappings { get; init; } = [];
     public List<StreamRename> StreamRenames { get; init; } = [];
     public List<OldYmtBackupPlan> OldYmtBackups { get; init; } = [];
+    public List<BrokenCreatureMetadataBackupPlan> BrokenCreatureMetadataBackups { get; init; } = [];
+    public List<MissingCreatureMetadataReference> MissingCreatureMetadataReferences { get; init; } = [];
     public List<SourceManifestWarning> SourceManifestWarnings { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
     public List<string> Errors { get; init; } = [];

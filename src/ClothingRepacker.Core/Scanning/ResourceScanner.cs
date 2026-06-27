@@ -30,6 +30,7 @@ public sealed class ResourceScanner
                 resourceName,
                 resourceDir,
                 files.Where(IsYmtCandidate).ToList(),
+                files.Where(IsShopMetaCandidate).ToList(),
                 files.Where(IsStreamCandidate).Select(path => new StreamFile(
                     resourceName,
                     resourceDir,
@@ -52,6 +53,11 @@ public sealed class ResourceScanner
            || path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
 
+    private static bool IsShopMetaCandidate(string path)
+        => path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+           || (path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+               && !path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase));
+
     private static bool IsStreamCandidate(string path)
     {
         var extension = Path.GetExtension(path);
@@ -68,5 +74,6 @@ public sealed record ResourceScanItem(
     string ResourceName,
     string ResourceRoot,
     IReadOnlyList<string> YmtFiles,
+    IReadOnlyList<string> ShopMetaFiles,
     IReadOnlyList<StreamFile> StreamFiles,
     string? ManifestPath);

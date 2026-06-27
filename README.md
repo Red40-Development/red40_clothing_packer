@@ -109,7 +109,7 @@ The two optional `build` toggles both default to `true`:
 - `--include-ymt-xml false` skips writing the preview `stream/*.ymt.xml` files
 - `--include-debug-client false` skips generating `client/validate_collections.lua` and removes its `client_script` line from `fxmanifest.lua`
 
-`--creature-metadata-mode repair` is the default during `analyze`. It preserves and remaps source creature metadata, then fills known missing high-heel and hair-scale entries from the source YMT expression data. Use `--creature-metadata-mode preserve` to keep only source creature metadata without synthesized repair entries.
+`--creature-metadata-mode repair` is the default during `analyze`. It preserves and remaps source creature metadata, then fills known missing high-heel and hair-scale entries from the source YMT expression data. Creature metadata without a matching source `ShopPedApparel` `creatureMetaData` reference is treated as broken, warned about during analyze, skipped during build, and only moved into the backup during apply. Use `--creature-metadata-mode preserve` to keep only source creature metadata without synthesized repair entries.
 
 Apply the plan to your actual resource set:
 

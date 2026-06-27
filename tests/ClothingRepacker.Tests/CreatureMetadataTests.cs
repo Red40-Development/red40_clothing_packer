@@ -17,6 +17,7 @@ public class CreatureMetadataTests
         File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01.ymt.xml"), Path.Combine(stream, "mp_f_freemode_01.ymt.xml"));
         File.Copy(TestFixturePaths.Ymt("mp_m_freemode_01.ymt.xml"), Path.Combine(stream, "mp_m_freemode_01.ymt.xml"));
         File.Copy(TestFixturePaths.Ymt("mp_creaturemetadata.ymt.xml"), Path.Combine(stream, "mp_creaturemetadata.ymt.xml"));
+        new XDocument(BuildShopMeta("mp_creaturemetadata")).Save(Path.Combine(root, "resources", "base_pack", "shop.meta"));
 
         var resources = Path.Combine(root, "resources");
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
@@ -52,6 +53,7 @@ public class CreatureMetadataTests
         Directory.CreateDirectory(stream);
         File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01.ymt"), Path.Combine(stream, "mp_f_freemode_01.ymt"));
         File.Copy(TestFixturePaths.Ymt("mp_creaturemetadata.ymt"), Path.Combine(stream, "mp_creaturemetadata.ymt"));
+        new XDocument(BuildShopMeta("mp_creaturemetadata")).Save(Path.Combine(root, "resources", "base_pack", "shop.meta"));
 
         var resources = Path.Combine(root, "resources");
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
@@ -62,6 +64,53 @@ public class CreatureMetadataTests
         Assert.Single(analyze.Plan.SourceYmts);
         Assert.Single(analyze.Plan.SourceCreatureMetadata);
         Assert.Equal("mp_creaturemetadata.ymt", Path.GetFileName(analyze.Plan.SourceCreatureMetadata[0].Path));
+    }
+
+    [Fact]
+    public async Task AnalyzeTreatsCreatureMetadataWithoutCorrespondingShopMetadataAsBroken()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"broken-creature-metadata-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeShopMeta: false);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        Assert.Single(analyze.Plan.BrokenCreatureMetadataBackups);
+        Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("has no corresponding ShopPedApparel creatureMetaData reference", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task BuildDoesNotGenerateCreatureMetadataForTargetWithBrokenSourceMetadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"broken-creature-metadata-build-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeShopMeta: false);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        var build = await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var metaPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "data",
+            "mp_f_freemode_01_merged_f_001.meta");
+        var shopMeta = XDocument.Load(metaPath);
+
+        Assert.Single(analyze.Plan.BrokenCreatureMetadataBackups);
+        Assert.False(File.Exists(metadataPath));
+        Assert.DoesNotContain(build.WrittenFiles, file => file.EndsWith("MP_CreatureMetadata_merged_f_001.ymt", StringComparison.OrdinalIgnoreCase));
+        Assert.Null(shopMeta.Root?.Element("creatureMetaData"));
     }
 
     [Fact]
@@ -145,6 +194,41 @@ public class CreatureMetadataTests
         Assert.Equal("CCreatureMetaData", xml.Root?.Name.LocalName);
         Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
         Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
+    }
+
+    [Fact]
+    public async Task AnalyzeWarnsAndBuildSkipsCreatureMetadataWhenShopReferenceIsMissing()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"missing-creature-metadata-reference-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9, includeCreatureMetadata: false);
+        new XDocument(BuildShopMeta("mp_creaturemetadata")).Save(Path.Combine(resources, "pack_a", "shop.meta"));
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        var build = await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var metaPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "data",
+            "mp_f_freemode_01_merged_f_001.meta");
+        var shopMeta = XDocument.Load(metaPath);
+
+        Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        Assert.Empty(analyze.Plan.BrokenCreatureMetadataBackups);
+        Assert.Single(analyze.Plan.MissingCreatureMetadataReferences);
+        Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("references missing creature metadata 'mp_creaturemetadata'", StringComparison.OrdinalIgnoreCase));
+        Assert.False(File.Exists(metadataPath));
+        Assert.DoesNotContain(build.WrittenFiles, file => file.EndsWith("MP_CreatureMetadata_merged_f_001.ymt", StringComparison.OrdinalIgnoreCase));
+        Assert.Null(shopMeta.Root?.Element("creatureMetaData"));
     }
 
     [Fact]
@@ -262,6 +346,7 @@ public class CreatureMetadataTests
         int componentExpressionIndex,
         int propExpressionIndex,
         bool includeCreatureMetadata = true,
+        bool includeShopMeta = true,
         bool includeHighHeelSignal = false,
         bool includeHairScalePropSignal = false)
     {
@@ -271,6 +356,10 @@ public class CreatureMetadataTests
         if (includeCreatureMetadata)
         {
             new XDocument(BuildCreatureMetadata(componentExpressionIndex, propExpressionIndex)).Save(Path.Combine(stream, "mp_creaturemetadata.ymt.xml"));
+            if (includeShopMeta)
+            {
+                new XDocument(BuildShopMeta("mp_creaturemetadata")).Save(Path.Combine(resourcesRoot, collectionName, "shop.meta"));
+            }
         }
     }
 
@@ -324,6 +413,17 @@ public class CreatureMetadataTests
             new XElement("pedCompExpressions",
                 new XAttribute("itemType", "CPedCompExpressionData"),
                 BuildCompExpression(0, componentExpressionIndex)));
+
+    private static XElement BuildShopMeta(string creatureMetadata)
+        => new("ShopPedApparel",
+            new XElement("pedName", "mp_f_freemode_01"),
+            new XElement("dlcName", "test"),
+            new XElement("fullDlcName", "mp_f_freemode_01_test"),
+            new XElement("eCharacter", "SCR_CHAR_MULTIPLAYER_F"),
+            new XElement("creatureMetaData", creatureMetadata),
+            new XElement("pedOutfits", new XAttribute("itemType", "ShopPedOutfit")),
+            new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent")),
+            new XElement("pedProps", new XAttribute("itemType", "ShopPedProp")));
 
     private static XElement BuildCompExpression(int varIndex, int expressionIndex)
         => new("Item",
