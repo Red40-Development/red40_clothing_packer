@@ -3,6 +3,7 @@ using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core;
 using ClothingRepacker.CodeWalker;
+using System.Reflection;
 
 var exitCode = await ProgramEntry.RunAsync(args);
 return exitCode;
@@ -11,14 +12,24 @@ internal static class ProgramEntry
 {
     public static async Task<int> RunAsync(string[] args)
     {
-        if (args.Length == 0 || args[0] is "--help" or "-h" or "help")
+        var normalizedArgs = args.ToList();
+        var skipVersionCheck = normalizedArgs.RemoveAll(arg =>
+            string.Equals(arg, "--no-version-check", StringComparison.OrdinalIgnoreCase)) > 0;
+
+        if (normalizedArgs.Count == 0 || normalizedArgs[0] is "--help" or "-h" or "help")
         {
             PrintHelp();
             return 0;
         }
 
-        var command = args[0].ToLowerInvariant();
-        var options = ParseOptions(args.Skip(1).ToArray());
+        var command = normalizedArgs[0].ToLowerInvariant();
+        var options = ParseOptions(normalizedArgs.Skip(1).ToArray());
+        if (skipVersionCheck)
+        {
+            options["--no-version-check"] = null;
+        }
+
+        await CheckForUpdatesAsync(options);
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
 
         try
@@ -187,7 +198,38 @@ clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>
 clothing-repacker export-xml --folder <path> [--overwrite]
+
+Global options:
+  --no-version-check   Skip the GitHub update check.
 """);
+    }
+
+    private static async Task CheckForUpdatesAsync(Dictionary<string, string?> options)
+    {
+        if (options.ContainsKey("--no-version-check") ||
+            string.Equals(Environment.GetEnvironmentVariable("RED40_NO_VERSION_CHECK"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var httpClient = new HttpClient();
+            var checker = new GitHubVersionChecker(httpClient, "Red40-Development", "red40_clothing_packer");
+            var currentVersion = AppVersion.FromInformationalVersion(
+                typeof(ProgramEntry).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+            var result = await checker.CheckAsync(currentVersion, cts.Token);
+            if (result is not null && result.IsUpdateAvailable)
+            {
+                Console.Error.WriteLine(
+                    $"Update available: {result.LatestVersion.Display} is newer than {result.CurrentVersion.Display}. Download: {result.ReleaseUrl}");
+            }
+        }
+        catch
+        {
+            // A failed update check should never block the requested CLI operation.
+        }
     }
 
     private static Dictionary<string, string?> ParseOptions(string[] args)

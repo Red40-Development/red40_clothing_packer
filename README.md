@@ -58,6 +58,8 @@ ClothingRepacker.Cli validate --resources <path>
 ClothingRepacker.Cli export-xml --folder <path> [--overwrite]
 ```
 
+By default, the CLI checks the latest GitHub release when a command starts and prints a notice if a newer version is available. Add `--no-version-check` to any command, or set `RED40_NO_VERSION_CHECK=1`, to skip the check.
+
 ### How to use
 
 Assume your clothing resources live in the same directory as the executable.
