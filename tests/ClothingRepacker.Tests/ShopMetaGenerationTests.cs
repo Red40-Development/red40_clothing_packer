@@ -32,8 +32,46 @@ public class ShopMetaGenerationTests
         Assert.Equal("SCR_CHAR_MULTIPLAYER_F", xml.Root?.Element("eCharacter")?.Value.Trim());
         Assert.Equal("MP_CreatureMetadata_merged_f_001", xml.Root?.Element("creatureMetaData")?.Value.Trim());
         Assert.NotNull(xml.Root?.Element("pedOutfits"));
-        Assert.NotNull(xml.Root?.Element("pedComponents"));
-        Assert.NotNull(xml.Root?.Element("pedProps"));
+        Assert.NotEmpty(xml.Root!.Element("pedComponents")!.Elements("Item"));
+
+        var component = xml.Root!.Element("pedComponents")!.Elements("Item").First();
+        Assert.NotNull(component.Element("componentId"));
+        Assert.NotNull(component.Element("drawableId"));
+        Assert.NotNull(component.Element("textureId"));
+        Assert.NotNull(component.Element("compDrawableId"));
+        Assert.NotNull(component.Element("compTexId"));
+        Assert.NotNull(component.Element("uniqueNameHash"));
+    }
+
+    [Fact]
+    public async Task BuildGeneratesShopPedPropEntriesWhenMergedCollectionHasProps()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"shop-meta-prop-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var stream = Path.Combine(resources, "prop_pack", "stream");
+        Directory.CreateDirectory(stream);
+        new XDocument(BuildPedVariationWithProp()).Save(Path.Combine(stream, "mp_f_freemode_01_prop_pack.ymt.xml"));
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var metaPath = Path.Combine(outputRoot, "zz_merged_clothing_meta", "data", "mp_f_freemode_01_merged_f_001.meta");
+        var xml = XDocument.Load(metaPath);
+
+        Assert.Equal("MP_CreatureMetadata_merged_f_001", xml.Root?.Element("creatureMetaData")?.Value.Trim());
+        Assert.NotEmpty(xml.Root!.Element("pedProps")!.Elements("Item"));
+
+        var prop = xml.Root!.Element("pedProps")!.Elements("Item").First();
+        Assert.NotNull(prop.Element("anchorId"));
+        Assert.NotNull(prop.Element("propId"));
+        Assert.NotNull(prop.Element("textureId"));
+        Assert.NotNull(prop.Element("propAnchorId"));
+        Assert.NotNull(prop.Element("propDrawableId"));
+        Assert.NotNull(prop.Element("propTexId"));
+        Assert.NotNull(prop.Element("uniqueNameHash"));
     }
 
     [Fact]
@@ -84,4 +122,23 @@ public class ShopMetaGenerationTests
         Assert.NotNull(xml.Root?.Element("pedProps"));
     }
 
+    private static XElement BuildPedVariationWithProp()
+        => new("CPedVariationInfo",
+            new XAttribute("name", "prop_pack"),
+            new XElement("availComp", "255 255 255 255 255 255 255 255 255 255 255 255"),
+            new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
+            new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
+            new XElement("propInfo",
+                new XElement("numAvailProps", new XAttribute("value", 1)),
+                new XElement("aPropMetaData",
+                    new XAttribute("itemType", "CPedPropMetaData"),
+                    new XElement("Item",
+                        new XElement("anchorId", new XAttribute("value", 0)),
+                        new XElement("propId", new XAttribute("value", 0)),
+                        new XElement("aTexData",
+                            new XAttribute("itemType", "CPVTextureData"),
+                            new XElement("Item", new XElement("texId", new XAttribute("value", 0))),
+                            new XElement("Item", new XElement("texId", new XAttribute("value", 1)))))),
+                new XElement("aAnchors", new XAttribute("itemType", "CAnchorProps"))),
+            new XElement("dlcName", "hash_00000000"));
 }

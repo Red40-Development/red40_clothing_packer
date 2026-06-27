@@ -54,6 +54,19 @@ public class BinaryYmtCodecTests
             roundTrippedXml.Root?.Element("aComponentData3")?.Elements("Item").Count());
     }
 
+    [Fact]
+    public async Task DecodesBinaryCreatureMetadataFixture()
+    {
+        var path = Fixture("mp_creaturemetadata.ymt");
+
+        var xml = await _codec.DecodeToXmlAsync(path);
+
+        Assert.Equal("CCreatureMetaData", xml.Root?.Name.LocalName);
+        Assert.NotNull(xml.Root?.Element("shaderVariableComponents"));
+        Assert.NotNull(xml.Root?.Element("pedPropExpressions"));
+        Assert.NotNull(xml.Root?.Element("pedCompExpressions"));
+    }
+
     public static IEnumerable<object[]> GetBinaryFixtures()
         => BinaryFixtures.Select(path => new object[] { path });
 

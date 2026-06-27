@@ -69,7 +69,7 @@ internal static class ProgramEntry
             MaxDrawablesPerProp = ParseInt(
                 options.GetValueOrDefault("--max-drawables-per-prop"),
                 legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerProp),
-            ShopMetaMode = options.GetValueOrDefault("--shop-meta-mode") ?? "minimal",
+            ShopMetaMode = options.GetValueOrDefault("--shop-meta-mode") ?? "complete",
             CreatureMetadataMode = options.GetValueOrDefault("--creature-metadata-mode") ?? "repair",
         };
 

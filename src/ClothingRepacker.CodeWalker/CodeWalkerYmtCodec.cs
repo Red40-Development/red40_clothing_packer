@@ -13,20 +13,20 @@ public sealed class CodeWalkerYmtCodec : IYmtCodec
 
         var data = File.ReadAllBytes(ymtPath);
         var entry = CreateFileEntry(Path.GetFileName(ymtPath), ymtPath, ref data);
-        var pedFile = new PedFile();
-        pedFile.Load(data, entry);
+        var ymtFile = new YmtFile();
+        ymtFile.Load(data, entry);
 
-        var xml = pedFile.Meta is not null
-            ? MetaXml.GetXml(pedFile.Meta)
-            : pedFile.Pso is not null
-                ? PsoXml.GetXml(pedFile.Pso)
-                : pedFile.Rbf is not null
-                    ? RbfXml.GetXml(pedFile.Rbf)
+        var xml = ymtFile.Meta is not null
+            ? MetaXml.GetXml(ymtFile.Meta)
+            : ymtFile.Pso is not null
+                ? PsoXml.GetXml(ymtFile.Pso)
+                : ymtFile.Rbf is not null
+                    ? RbfXml.GetXml(ymtFile.Rbf)
                     : null;
 
         if (string.IsNullOrWhiteSpace(xml))
         {
-            throw new InvalidDataException($"CodeWalker could not decode '{ymtPath}' as a clothing YMT.");
+            throw new InvalidDataException($"CodeWalker could not decode '{ymtPath}' as a YMT.");
         }
 
         return Task.FromResult(XDocument.Parse(xml, LoadOptions.PreserveWhitespace));

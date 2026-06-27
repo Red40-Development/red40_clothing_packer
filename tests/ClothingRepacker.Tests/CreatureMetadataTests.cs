@@ -45,6 +45,26 @@ public class CreatureMetadataTests
     }
 
     [Fact]
+    public async Task AnalyzeAcceptsBinaryCreatureMetadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"binary-creature-metadata-fixture-test-{Guid.NewGuid():N}");
+        var stream = Path.Combine(root, "resources", "base_pack", "stream");
+        Directory.CreateDirectory(stream);
+        File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01.ymt"), Path.Combine(stream, "mp_f_freemode_01.ymt"));
+        File.Copy(TestFixturePaths.Ymt("mp_creaturemetadata.ymt"), Path.Combine(stream, "mp_creaturemetadata.ymt"));
+
+        var resources = Path.Combine(root, "resources");
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.Empty(analyze.Plan.Errors);
+        Assert.Single(analyze.Plan.SourceYmts);
+        Assert.Single(analyze.Plan.SourceCreatureMetadata);
+        Assert.Equal("mp_creaturemetadata.ymt", Path.GetFileName(analyze.Plan.SourceCreatureMetadata[0].Path));
+    }
+
+    [Fact]
     public async Task BuildMergesThreeCreatureMetadataFilesIntoExpectedFixture()
     {
         var root = Path.Combine(Path.GetTempPath(), $"creature-metadata-fixture-test-{Guid.NewGuid():N}");

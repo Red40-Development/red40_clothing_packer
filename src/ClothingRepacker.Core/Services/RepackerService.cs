@@ -279,7 +279,7 @@ public sealed class RepackerService
 
             var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
             Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-            await File.WriteAllTextAsync(metaPath, BuildMinimalShopMeta(targetPlan), cancellationToken);
+            BuildShopMeta(targetPlan, xml).Save(metaPath);
             writtenFiles.Add(metaPath);
 
             progress?.Report(new OperationProgress(
@@ -742,23 +742,112 @@ public sealed class RepackerService
         }
     }
 
-    private static string BuildMinimalShopMeta(TargetCollectionPlan plan)
-        => $$"""
-<?xml version="1.0" encoding="UTF-8"?>
-<ShopPedApparel>
-  <pedName>{{InferPedBaseName(plan.FullCollectionName)}}</pedName>
-  <dlcName>{{plan.CollectionName}}</dlcName>
-  <fullDlcName>{{plan.FullCollectionName}}</fullDlcName>
-  <eCharacter>{{GetCharacterName(plan.Gender)}}</eCharacter>
-  <creatureMetaData>MP_CreatureMetadata_{{plan.CollectionName}}</creatureMetaData>
-  <pedOutfits>
-  </pedOutfits>
-  <pedComponents>
-  </pedComponents>
-  <pedProps>
-  </pedProps>
-</ShopPedApparel>
-""";
+    private static XDocument BuildShopMeta(TargetCollectionPlan plan, XDocument pedVariationXml)
+        => new(
+            new XDeclaration("1.0", "utf-8", null),
+            new XElement("ShopPedApparel",
+                new XElement("pedName", InferPedBaseName(plan.FullCollectionName)),
+                new XElement("dlcName", plan.CollectionName),
+                new XElement("fullDlcName", plan.FullCollectionName),
+                new XElement("eCharacter", GetCharacterName(plan.Gender)),
+                new XElement("creatureMetaData", $"MP_CreatureMetadata_{plan.CollectionName}"),
+                new XElement("pedOutfits", new XAttribute("itemType", "ShopPedOutfit")),
+                new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml)),
+                new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml))));
+
+    private static IEnumerable<XElement> BuildShopComponentItems(TargetCollectionPlan plan, XDocument pedVariationXml)
+    {
+        var root = pedVariationXml.Root;
+        if (root is null)
+        {
+            yield break;
+        }
+
+        var availComp = XmlHelpers.ParseIntList(root.Element("availComp")?.Value ?? string.Empty);
+        var componentData = XmlHelpers.Items(root.Element("aComponentData3"));
+        for (var componentId = 0; componentId < Math.Min(availComp.Length, ClothingConstants.ComponentSlotCount); componentId++)
+        {
+            var componentDataIndex = availComp[componentId];
+            if (componentDataIndex == ClothingConstants.MissingComponent
+                || componentDataIndex < 0
+                || componentDataIndex >= componentData.Count)
+            {
+                continue;
+            }
+
+            var drawables = XmlHelpers.Items(componentData[componentDataIndex].Element("aDrawblData3"));
+            for (var drawableIndex = 0; drawableIndex < drawables.Count; drawableIndex++)
+            {
+                var textureCount = Math.Max(1, XmlHelpers.Items(drawables[drawableIndex].Element("aTexData")).Count);
+                for (var textureIndex = 0; textureIndex < textureCount; textureIndex++)
+                {
+                    var prefix = ClothingConstants.ComponentPrefixes.GetValueOrDefault(componentId, $"comp_{componentId}");
+                    var uniqueName = $"{plan.FullCollectionName}_{prefix}_{drawableIndex:000}_{textureIndex:00}";
+                    yield return BuildBaseShopItem(uniqueName, "CLO_SHOP_NONE",
+                        new XElement("componentId", new XAttribute("value", componentId)),
+                        new XElement("drawableId", new XAttribute("value", drawableIndex)),
+                        new XElement("textureId", new XAttribute("value", textureIndex)),
+                        new XElement("compDrawableId", new XAttribute("value", drawableIndex)),
+                        new XElement("compTexId", new XAttribute("value", textureIndex)),
+                        new XElement("isInOutfit", new XAttribute("value", "false")));
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<XElement> BuildShopPropItems(TargetCollectionPlan plan, XDocument pedVariationXml)
+    {
+        var root = pedVariationXml.Root;
+        if (root is null)
+        {
+            yield break;
+        }
+
+        var propMetadata = XmlHelpers.Items(root.Element("propInfo")?.Element("aPropMetaData"))
+            .Select(item => new
+            {
+                Item = item,
+                AnchorId = TryGetElementValue(item, "anchorId", out var anchorId) ? anchorId : -1,
+                PropId = TryGetElementValue(item, "propId", out var propId) ? propId : -1,
+            })
+            .Where(item => item.AnchorId >= 0 && item.PropId >= 0)
+            .OrderBy(item => item.AnchorId)
+            .ThenBy(item => item.PropId);
+
+        foreach (var prop in propMetadata)
+        {
+            var textureCount = Math.Max(1, XmlHelpers.Items(prop.Item.Element("aTexData")).Count);
+            for (var textureIndex = 0; textureIndex < textureCount; textureIndex++)
+            {
+                var prefix = ClothingConstants.PropPrefixes.GetValueOrDefault(prop.AnchorId, $"prop_{prop.AnchorId}");
+                var uniqueName = $"{plan.FullCollectionName}_{prefix}_{prop.PropId:000}_{textureIndex:00}";
+                yield return BuildBaseShopItem(uniqueName, "CLO_SHOP_NONE",
+                    new XElement("anchorId", new XAttribute("value", prop.AnchorId)),
+                    new XElement("propId", new XAttribute("value", prop.PropId)),
+                    new XElement("textureId", new XAttribute("value", textureIndex)),
+                    new XElement("propAnchorId", new XAttribute("value", prop.AnchorId)),
+                    new XElement("propDrawableId", new XAttribute("value", prop.PropId)),
+                    new XElement("propTexId", new XAttribute("value", textureIndex)),
+                    new XElement("isInOutfit", new XAttribute("value", "false")));
+            }
+        }
+    }
+
+    private static XElement BuildBaseShopItem(string uniqueName, string shop, params object[] fields)
+        => new("Item",
+            new XElement("lockHash", 0),
+            new XElement("cost", new XAttribute("value", 0)),
+            new XElement("textLabel", uniqueName),
+            new XElement("uniqueNameHash", uniqueName),
+            new XElement("eShopEnum", shop),
+            fields);
+
+    private static bool TryGetElementValue(XElement item, string name, out int value)
+    {
+        value = 0;
+        var attribute = item.Element(name)?.Attribute("value");
+        return attribute is not null && int.TryParse(attribute.Value, out value);
+    }
 
     private static string GetCharacterName(PedGender gender)
         => gender switch
