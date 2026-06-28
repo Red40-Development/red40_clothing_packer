@@ -66,12 +66,6 @@ Assume your clothing resources live in the same directory as the executable.
 
 Open a terminal (Powershell/Terminal) and navigate to your folder with all your clothing assets such as `[clothing]`
 
-Export `.ymt` files to XML:
-
-```bash
-ClothingRepacker.Cli export-xml --folder .
-```
-
 Create a merge plan:
 
 ```bash
@@ -148,6 +142,16 @@ ClothingRepacker.Cli restore \
 - Delete the generated merged resource created by `apply`
 - Put backed-up source `.ymt` files back in their original locations
 - Move renamed stream files back to their original names
+
+
+`export` will:
+
+- Export `.ymt` files to XML
+
+```bash
+ClothingRepacker.Cli export-xml --folder .
+```
+
 
 NOTE:
 
