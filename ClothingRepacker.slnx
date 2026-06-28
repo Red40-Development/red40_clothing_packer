@@ -3,6 +3,7 @@
     <Project Path="src/ClothingRepacker.Cli/ClothingRepacker.Cli.csproj" />
     <Project Path="src/ClothingRepacker.CodeWalker/ClothingRepacker.CodeWalker.csproj" />
     <Project Path="src/ClothingRepacker.Core/ClothingRepacker.Core.csproj" />
+    <Project Path="src/ClothingRepacker.Gui/ClothingRepacker.Gui.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ClothingRepacker.Tests/ClothingRepacker.Tests.csproj" />

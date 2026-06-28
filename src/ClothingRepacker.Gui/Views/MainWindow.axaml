@@ -1,0 +1,133 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ClothingRepacker.Gui.Views.MainWindow"
+        Title="Red40 Clothing Repacker"
+        Width="1180"
+        Height="760"
+        MinWidth="980"
+        MinHeight="640">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+    <Border Grid.Row="0" Padding="16,14" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+        <StackPanel Grid.Column="0" Spacing="8">
+          <TextBlock Classes="section-title" Text="Resources Folder" />
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+            <TextBox Grid.Column="0"
+                     Watermark="Drop a clothing resources folder here or browse"
+                     Text="{Binding ResourcesPath, Mode=TwoWay}" />
+            <Button Grid.Column="1" Content="Browse..." Click="BrowseResources_Click" />
+          </Grid>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+          <Button Content="Export XML" Command="{Binding ExportXmlCommand}" IsEnabled="{Binding CanExportXml}" />
+          <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
+          <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
+          <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
+          <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+        </StackPanel>
+        <TextBlock Grid.Column="0"
+                   Grid.Row="1"
+                   Text="Drag and drop a folder anywhere in this window to select it."
+                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="340,*" ColumnSpacing="12" Margin="12">
+      <ScrollViewer Grid.Column="0">
+        <StackPanel Spacing="12">
+          <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="section-title" Text="Options" />
+              <TextBlock Text="Target resource" />
+              <TextBox Text="{Binding TargetResource, Mode=TwoWay}" />
+              <TextBlock Text="Target prefix" />
+              <TextBox Text="{Binding TargetPrefix, Mode=TwoWay}" />
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Spacing="4">
+                  <TextBlock Text="Female prefix" />
+                  <TextBox Text="{Binding FemalePrefix, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Text="Male prefix" />
+                  <TextBox Text="{Binding MalePrefix, Mode=TwoWay}" />
+                </StackPanel>
+              </Grid>
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <StackPanel Grid.Column="0" Spacing="4">
+                  <TextBlock Text="Max component drawables" />
+                  <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerComponent, Mode=TwoWay}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="4">
+                  <TextBlock Text="Max prop drawables" />
+                  <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerProp, Mode=TwoWay}" />
+                </StackPanel>
+              </Grid>
+              <CheckBox Content="Include preview YMT XML" IsChecked="{Binding IncludeYmtXml, Mode=TwoWay}" />
+              <CheckBox Content="Include debug client script" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" />
+              <CheckBox Content="Overwrite XML sidecars during export" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
+              <CheckBox Content="Save generated plan JSON" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
+            </StackPanel>
+          </Border>
+
+          <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="section-title" Text="Paths" />
+              <TextBlock Text="Plan JSON" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding PlanPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowsePlan_Click" />
+              </Grid>
+              <TextBlock Text="Preview output" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding OutputPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseOutput_Click" />
+              </Grid>
+              <TextBlock Text="Backup root" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding BackupRoot, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseBackup_Click" />
+              </Grid>
+              <TextBlock Text="Restore manifest" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding RestoreManifestPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseRestoreManifest_Click" />
+              </Grid>
+              <Button Content="Restore Backup" Command="{Binding RestoreCommand}" IsEnabled="{Binding CanRestoreBackup}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
+        <Border Grid.Row="0" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+          <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Text="{Binding Status}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <TextBlock Grid.Column="0" Text="{Binding CurrentStage}" />
+              <TextBlock Grid.Column="1" Text="{Binding ActivePath}" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+            </Grid>
+            <ProgressBar Grid.Row="2" Minimum="0" Maximum="100" Value="{Binding ProgressValue}" />
+          </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1">
+          <TabItem Header="Summary">
+            <ListBox ItemsSource="{Binding SummaryLines}" />
+          </TabItem>
+          <TabItem Header="Warnings">
+            <ListBox ItemsSource="{Binding Warnings}" />
+          </TabItem>
+          <TabItem Header="Errors">
+            <ListBox ItemsSource="{Binding Errors}" />
+          </TabItem>
+          <TabItem Header="Files">
+            <ListBox ItemsSource="{Binding Files}" />
+          </TabItem>
+          <TabItem Header="Log">
+            <ListBox ItemsSource="{Binding LogLines}" />
+          </TabItem>
+        </TabControl>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>
