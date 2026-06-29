@@ -37,7 +37,7 @@ public class GuiWorkflowTests
 
         Assert.Equal([root], workflow.AnalyzeResourceFolders);
         Assert.Equal(Directory.GetParent(root)!.FullName, workflow.AnalyzeGeneratedResourcesRoot);
-        Assert.True(workflow.AnalyzeSettings.RenameStreamsInPlace);
+        Assert.False(workflow.AnalyzeSettings.RenameStreamsInPlace);
         Assert.Equal(1, vm.SelectedTabIndex);
         Assert.Equal(2, vm.Summary.SourceYmtCount);
         Assert.Equal(1, vm.Summary.TargetCollectionCount);
@@ -83,6 +83,8 @@ public class GuiWorkflowTests
 
         Assert.True(vm.CanApply());
         Assert.Single(vm.Files);
+        Assert.False(workflow.BuildOptions.IncludeYmtXml);
+        Assert.False(workflow.BuildOptions.IncludeDebugClient);
     }
 
     [Fact]
@@ -98,7 +100,6 @@ public class GuiWorkflowTests
         var vm = CreateViewModel(workflow);
         vm.SelectResourcesFolder(root);
         vm.OutputPath = output;
-        vm.CopyResourcesToOutputBeforeRename = true;
 
         await vm.AnalyzeAsync();
         await vm.BuildPreviewAsync();
@@ -267,6 +268,9 @@ public class GuiWorkflowTests
 
         Assert.Equal([root], settingsStore.LastSaved.ResourcePaths);
         Assert.Equal(generatedRoot, settingsStore.LastSaved.GeneratedResourcesRoot);
+        Assert.False(settingsStore.LastSaved.IncludeYmtXml);
+        Assert.False(settingsStore.LastSaved.IncludeDebugClient);
+        Assert.True(settingsStore.LastSaved.CopyResourcesToOutputBeforeRename);
     }
 
     private static MainWindowViewModel CreateViewModel(FakeWorkflow? workflow = null)
@@ -347,6 +351,7 @@ public class GuiWorkflowTests
         public IReadOnlyList<string> AnalyzeResourceFolders { get; private set; } = [];
         public string AnalyzeGeneratedResourcesRoot { get; private set; } = string.Empty;
         public MergePlanSettings AnalyzeSettings { get; private set; } = new();
+        public BuildOptions BuildOptions { get; private set; } = new();
         public ApplyOptions ApplyOptions { get; private set; } = new();
 
         public Task<AnalyzeResult> AnalyzeAsync(IReadOnlyList<string> resourceFolders, string generatedResourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
@@ -361,7 +366,10 @@ public class GuiWorkflowTests
             => Task.CompletedTask;
 
         public Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
-            => Task.FromResult(BuildResult);
+        {
+            BuildOptions = options;
+            return Task.FromResult(BuildResult);
+        }
 
         public Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, ApplyOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         {

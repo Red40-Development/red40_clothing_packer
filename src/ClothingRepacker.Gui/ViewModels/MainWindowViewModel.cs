@@ -27,11 +27,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _malePrefix = "merged_m";
     private int _maxDrawablesPerComponent = ClothingConstants.DefaultMaxDrawablesPerComponent;
     private int _maxDrawablesPerProp = ClothingConstants.DefaultMaxDrawablesPerProp;
-    private bool _includeYmtXml = true;
-    private bool _includeDebugClient = true;
+    private bool _includeYmtXml;
+    private bool _includeDebugClient;
     private bool _overwriteXml;
     private bool _savePlan = true;
-    private bool _copyResourcesToOutputBeforeRename;
+    private bool _copyResourcesToOutputBeforeRename = true;
     private bool _isBusy;
     private string _status = "Select clothing resource folders to begin.";
     private string _currentStage = "Idle";

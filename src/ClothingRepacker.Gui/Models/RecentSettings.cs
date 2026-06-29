@@ -14,9 +14,9 @@ public sealed class RecentSettings
     public string MalePrefix { get; set; } = "merged_m";
     public int MaxDrawablesPerComponent { get; set; } = ClothingRepacker.Core.ClothingConstants.DefaultMaxDrawablesPerComponent;
     public int MaxDrawablesPerProp { get; set; } = ClothingRepacker.Core.ClothingConstants.DefaultMaxDrawablesPerProp;
-    public bool IncludeYmtXml { get; set; } = true;
-    public bool IncludeDebugClient { get; set; } = true;
+    public bool IncludeYmtXml { get; set; }
+    public bool IncludeDebugClient { get; set; }
     public bool OverwriteXml { get; set; }
     public bool SavePlan { get; set; } = true;
-    public bool CopyResourcesToOutputBeforeRename { get; set; }
+    public bool CopyResourcesToOutputBeforeRename { get; set; } = true;
 }
