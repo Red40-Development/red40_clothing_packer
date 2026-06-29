@@ -204,6 +204,22 @@ public class GuiWorkflowTests
     }
 
     [Fact]
+    public void AddingResourceFoldersFromDroppedTextAcceptsPathsAndFileUris()
+    {
+        var first = CreateTempDirectory("gui-dropped-text-first");
+        var second = CreateTempDirectory("gui-dropped-text-second");
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "__resource.lua"), "resource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'");
+        var text = $"\"{first}\"{Environment.NewLine}{new Uri(second).AbsoluteUri}";
+        var vm = CreateViewModel();
+
+        vm.AddResourceFoldersFromText(text);
+
+        Assert.Equal([first, second], vm.ResourcePaths.ToArray());
+        Assert.True(vm.CanAnalyzeResources);
+    }
+
+    [Fact]
     public async Task RecentSettingsMigratesOldResourcesPathAndPersistsResourceList()
     {
         var root = CreateTempDirectory("gui-settings-root");

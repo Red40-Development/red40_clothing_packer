@@ -355,6 +355,33 @@ public sealed class MainWindowViewModel : ViewModelBase
         Status = $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected. Run Analyze to preview changes.";
     }
 
+    public void AddResourceFoldersFromText(string text)
+    {
+        var paths = ParseResourceFolderText(text);
+        AddResourceFolders(paths);
+    }
+
+    private static IReadOnlyList<string> ParseResourceFolderText(string text)
+    {
+        return text
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(line => !line.StartsWith('#'))
+            .Select(NormalizeDroppedPathText)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToList();
+    }
+
+    private static string NormalizeDroppedPathText(string text)
+    {
+        var path = text.Trim().Trim('"', '\'');
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile)
+        {
+            return uri.LocalPath;
+        }
+
+        return path;
+    }
+
     private static IReadOnlyList<string> ExpandResourceFolderSelections(IEnumerable<string> paths)
     {
         var resources = new List<string>();

@@ -5,7 +5,8 @@
         Width="1180"
         Height="760"
         MinWidth="980"
-        MinHeight="640">
+        MinHeight="640"
+        DragDrop.AllowDrop="True">
   <Grid RowDefinitions="Auto,*" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
     <Border Grid.Row="0" Padding="16,14" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
       <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="12" RowSpacing="8">

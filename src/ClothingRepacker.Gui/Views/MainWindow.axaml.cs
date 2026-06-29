@@ -84,48 +84,60 @@ public partial class MainWindow : Window
 
     private void DragOver(object? sender, DragEventArgs e)
     {
-        e.DragEffects = e.DataTransfer.Contains(DataFormat.File)
+        e.DragEffects = HasSupportedDropData(e)
             ? DragDropEffects.Copy
             : DragDropEffects.None;
+        e.Handled = true;
     }
 
     private async void Drop(object? sender, DragEventArgs e)
     {
-        if (!e.DataTransfer.Contains(DataFormat.File) || ViewModel is null)
+        if (ViewModel is null)
         {
             return;
         }
 
+        var resourceCountBeforeDrop = ViewModel.ResourcePaths.Count;
         var files = e.DataTransfer.TryGetFiles();
-        if (files is null)
+        if (files is not null)
         {
-            return;
-        }
-
-        var folders = new List<string>();
-        foreach (var item in files)
-        {
-            if (item is IStorageFolder folder)
+            var folders = new List<string>();
+            foreach (var item in files)
             {
-                folders.Add(folder.Path.LocalPath);
-                continue;
+                if (item is IStorageFolder folder)
+                {
+                    folders.Add(folder.Path.LocalPath);
+                    continue;
+                }
+
+                var localPath = item.Path.LocalPath;
+                if (Directory.Exists(localPath))
+                {
+                    folders.Add(localPath);
+                }
             }
 
-            var localPath = item.Path.LocalPath;
-            if (Directory.Exists(localPath))
-            {
-                folders.Add(localPath);
-            }
-        }
-
-        if (folders.Count > 0)
-        {
             ViewModel.AddResourceFolders(folders);
+        }
+
+        if (e.DataTransfer.TryGetText() is { } text)
+        {
+            ViewModel.AddResourceFoldersFromText(text);
+        }
+
+        if (ViewModel.ResourcePaths.Count > resourceCountBeforeDrop)
+        {
             return;
         }
 
-        await ShowMessageAsync("Folder required", "Drop clothing resource folders, not individual files.");
+        await ShowMessageAsync("Folder required", "Drop resource folder paths or clothing resource folders.");
     }
+
+    private static bool HasSupportedDropData(DragEventArgs e)
+        => e.DataTransfer.Contains(DataFormat.File)
+           || e.DataTransfer.Contains(DataFormat.Text)
+           || e.DataTransfer.TryGetFiles() is not null
+           || e.DataTransfer.TryGetText() is not null;
 
     private async Task<string?> PickFolderAsync(string title)
         => (await PickFoldersAsync(title, allowMultiple: false)).FirstOrDefault();
