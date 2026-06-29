@@ -172,6 +172,8 @@ public sealed class MergePlan
     public int SchemaVersion { get; init; } = 1;
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public string ResourcesRoot { get; init; } = string.Empty;
+    public List<string> ResourceRoots { get; init; } = [];
+    public string GeneratedResourcesRoot { get; init; } = string.Empty;
     public string TargetResource { get; init; } = "zz_merged_clothing_meta";
     public MergePlanSettings Settings { get; init; } = new();
     public List<SourceYmtSummary> SourceYmts { get; init; } = [];
@@ -227,6 +229,11 @@ public sealed record BuildOptions
 public sealed record BuildResult(
     string OutputRoot,
     IReadOnlyList<string> WrittenFiles);
+
+public sealed record ApplyOptions
+{
+    public bool CopyResourcesToOutputBeforeRename { get; init; }
+}
 
 public sealed record ExportXmlResult(
     string RootFolder,

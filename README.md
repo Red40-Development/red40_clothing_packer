@@ -48,6 +48,9 @@ If you are running from source, use `dotnet run --project src/ClothingRepacker.C
 ```bash
 ClothingRepacker.Cli analyze --resources <path> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+ClothingRepacker.Cli analyze --resource <path_to_resource> [--resource <path_to_resource> ...]
+  --generated-root <folder> --target-resource <name> --out <plan.json>
+  [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
@@ -55,6 +58,7 @@ ClothingRepacker.Cli apply --plan <plan.json> --backup-root <folder>
 ClothingRepacker.Cli restore --backup-manifest <backup-manifest.json>
 ClothingRepacker.Cli validate --plan <plan.json>
 ClothingRepacker.Cli validate --resources <path>
+ClothingRepacker.Cli validate --resource <path_to_resource> [--resource <path_to_resource> ...] --generated-root <folder>
 ClothingRepacker.Cli export-xml --folder <path> [--overwrite]
 ```
 
@@ -80,6 +84,19 @@ ClothingRepacker.Cli analyze \
   --target-resource zz_merged_clothing_meta \
   --out plan.json
 ```
+
+Or pick exact resource folders instead of scanning every child folder under one parent:
+
+```bash
+ClothingRepacker.Cli analyze \
+  --resource ./gang_flags \
+  --resource ./gang_outfits \
+  --generated-root . \
+  --target-resource zz_merged_clothing_meta \
+  --out plan.json
+```
+
+When using one or more `--resource` options, each value must be an actual resource folder. `--generated-root` controls where `apply` will copy the generated merged resource and any standalone generated resources.
 
 Validate the generated plan:
 
@@ -124,7 +141,7 @@ ClothingRepacker.Cli apply \
 
 - Renames stream files according to the plan
 - Copies original source `.ymt` files into a timestamped backup folder, then removes them from the source resources
-- Creates the generated merged resource as a sibling folder next to your resources root
+- Creates the generated merged resource under the plan's generated root. For `--resources <parent>` plans this remains the sibling folder next to your resources root; for repeated `--resource` plans it is the `--generated-root` folder.
 
 ## How to Undo What the Tool Did
 

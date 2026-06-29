@@ -21,27 +21,55 @@ public sealed class ResourceScanner
         var results = new List<ResourceScanItem>();
         foreach (var resourceDir in directories)
         {
-            var resourceName = Path.GetFileName(resourceDir);
-            var files = Directory.GetFiles(resourceDir, "*", SearchOption.AllDirectories)
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            results.Add(new ResourceScanItem(
-                resourceName,
-                resourceDir,
-                files.Where(IsYmtCandidate).ToList(),
-                files.Where(IsShopMetaCandidate).ToList(),
-                files.Where(IsStreamCandidate).Select(path => new StreamFile(
-                    resourceName,
-                    resourceDir,
-                    path,
-                    Path.GetFileName(path),
-                    Path.GetExtension(path),
-                    path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))).ToList(),
-                files.FirstOrDefault(IsManifest)));
+            results.Add(ScanResourceFolder(resourceDir));
         }
 
         return results;
+    }
+
+    public IReadOnlyList<ResourceScanItem> ScanResourceFolders(IEnumerable<string> resourceFolders)
+    {
+        var roots = resourceFolders
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var results = new List<ResourceScanItem>();
+        foreach (var root in roots)
+        {
+            if (!Directory.Exists(root))
+            {
+                throw new DirectoryNotFoundException(root);
+            }
+
+            results.Add(ScanResourceFolder(root));
+        }
+
+        return results;
+    }
+
+    private static ResourceScanItem ScanResourceFolder(string resourceDir)
+    {
+        var resourceName = Path.GetFileName(resourceDir);
+        var files = Directory.GetFiles(resourceDir, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new ResourceScanItem(
+            resourceName,
+            resourceDir,
+            files.Where(IsYmtCandidate).ToList(),
+            files.Where(IsShopMetaCandidate).ToList(),
+            files.Where(IsStreamCandidate).Select(path => new StreamFile(
+                resourceName,
+                resourceDir,
+                path,
+                Path.GetFileName(path),
+                Path.GetExtension(path),
+                path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))).ToList(),
+            files.FirstOrDefault(IsManifest));
     }
 
     private static bool IsManifest(string path)
