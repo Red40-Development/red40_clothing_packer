@@ -19,16 +19,22 @@ public partial class MainWindow : Window
 
     private async void BrowseResources_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await PickFolderAsync("Select clothing resources folder");
-        if (path is not null)
+        var paths = await PickFoldersAsync("Select clothing resource folders", allowMultiple: true);
+        if (paths.Count > 0)
         {
-            ViewModel?.SelectResourcesFolder(path);
+            ViewModel?.AddResourceFolders(paths);
         }
     }
 
+    private void RemoveResource_Click(object? sender, RoutedEventArgs e)
+        => ViewModel?.RemoveSelectedResourceFolder();
+
+    private void ClearResources_Click(object? sender, RoutedEventArgs e)
+        => ViewModel?.ClearResourceFolders();
+
     private async void BrowseOutput_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await PickFolderAsync("Select preview output folder");
+        var path = await PickFolderAsync("Select output root folder");
         if (path is not null && ViewModel is { } vm)
         {
             vm.OutputPath = path;
@@ -96,40 +102,49 @@ public partial class MainWindow : Window
             return;
         }
 
+        var folders = new List<string>();
         foreach (var item in files)
         {
             if (item is IStorageFolder folder)
             {
-                ViewModel.SelectResourcesFolder(folder.Path.LocalPath);
-                return;
+                folders.Add(folder.Path.LocalPath);
+                continue;
             }
 
             var localPath = item.Path.LocalPath;
             if (Directory.Exists(localPath))
             {
-                ViewModel.SelectResourcesFolder(localPath);
-                return;
+                folders.Add(localPath);
             }
         }
 
-        await ShowMessageAsync("Folder required", "Drop a clothing resources folder, not an individual file.");
+        if (folders.Count > 0)
+        {
+            ViewModel.AddResourceFolders(folders);
+            return;
+        }
+
+        await ShowMessageAsync("Folder required", "Drop clothing resource folders, not individual files.");
     }
 
     private async Task<string?> PickFolderAsync(string title)
+        => (await PickFoldersAsync(title, allowMultiple: false)).FirstOrDefault();
+
+    private async Task<IReadOnlyList<string>> PickFoldersAsync(string title, bool allowMultiple)
     {
         var topLevel = GetTopLevel(this);
         if (topLevel is null)
         {
-            return null;
+            return [];
         }
 
         var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = title,
-            AllowMultiple = false,
+            AllowMultiple = allowMultiple,
         });
 
-        return folders.Count == 0 ? null : folders[0].Path.LocalPath;
+        return folders.Select(folder => folder.Path.LocalPath).ToList();
     }
 
     private async Task<string?> OpenFileAsync(string title, string fileTypeName, IReadOnlyList<string> extensions)
@@ -182,6 +197,7 @@ public partial class MainWindow : Window
 
     private async Task<bool> ConfirmApplyAsync(MainWindowViewModel vm)
     {
+        var dialogContent = BuildApplyDialogContent(vm);
         var dialog = new Window
         {
             Title = "Apply plan",
@@ -189,36 +205,29 @@ public partial class MainWindow : Window
             Height = 250,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
-            Content = BuildApplyDialogContent(vm),
+            Content = dialogContent.Panel,
         };
 
         var result = false;
-        if (dialog.Content is Panel panel)
+        dialogContent.ApplyButton.Click += (_, _) =>
         {
-            var applyButton = panel.FindControl<Button>("ApplyButton");
-            var cancelButton = panel.FindControl<Button>("CancelButton");
-            if (applyButton is not null)
-            {
-                applyButton.Click += (_, _) =>
-                {
-                    result = true;
-                    dialog.Close();
-                };
-            }
-
-            if (cancelButton is not null)
-            {
-                cancelButton.Click += (_, _) => dialog.Close();
-            }
-        }
+            result = true;
+            dialog.Close();
+        };
+        dialogContent.CancelButton.Click += (_, _) => dialog.Close();
 
         await dialog.ShowDialog(this);
         return result;
     }
 
-    private static Panel BuildApplyDialogContent(MainWindowViewModel vm)
+    private static ApplyDialogContent BuildApplyDialogContent(MainWindowViewModel vm)
     {
-        return new StackPanel
+        var cancelButton = new Button { Content = "Cancel" };
+        var applyButton = new Button { Content = "Apply" };
+        var modeMessage = vm.CopyResourcesToOutputBeforeRename
+            ? "Apply will copy source resources into the output root, rename stream files in that copy, remove copied merged source YMT files after backing them up, and copy generated resources into place. Original resources will not be renamed."
+            : "Apply will rename stream files, remove merged source YMT files after backing them up, and copy generated resources into place.";
+        var panel = new StackPanel
         {
             Margin = new Avalonia.Thickness(18),
             Spacing = 12,
@@ -226,7 +235,7 @@ public partial class MainWindow : Window
             {
                 new TextBlock
                 {
-                    Text = "Apply will rename stream files, remove merged source YMT files after backing them up, and copy generated resources into place.",
+                    Text = modeMessage,
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                 },
                 new TextBlock { Text = $"Backup root: {vm.BackupRoot}", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
@@ -239,13 +248,17 @@ public partial class MainWindow : Window
                     Spacing = 8,
                     Children =
                     {
-                        new Button { Name = "CancelButton", Content = "Cancel" },
-                        new Button { Name = "ApplyButton", Content = "Apply" },
+                        cancelButton,
+                        applyButton,
                     }
                 }
             }
         };
+
+        return new ApplyDialogContent(panel, applyButton, cancelButton);
     }
+
+    private sealed record ApplyDialogContent(Panel Panel, Button ApplyButton, Button CancelButton);
 
     private async Task ShowMessageAsync(string title, string message)
     {

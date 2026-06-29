@@ -15,7 +15,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _hasSuccessfulBuild;
 
     private string _resourcesPath = string.Empty;
+    private string? _selectedResourcePath;
     private string _outputPath = string.Empty;
+    private string _generatedResourcesRoot = string.Empty;
     private string _backupRoot = string.Empty;
     private string _planPath = string.Empty;
     private string _restoreManifestPath = string.Empty;
@@ -29,12 +31,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _includeDebugClient = true;
     private bool _overwriteXml;
     private bool _savePlan = true;
+    private bool _copyResourcesToOutputBeforeRename;
     private bool _isBusy;
-    private string _status = "Select a clothing resources folder to begin.";
+    private string _status = "Select clothing resource folders to begin.";
     private string _currentStage = "Idle";
     private string _activePath = string.Empty;
     private int _progressCurrent;
     private int _progressTotal;
+    private int _selectedTabIndex;
     private WorkflowSummary _summary = new(0, 0, 0, 0, 0);
 
     public MainWindowViewModel(IRepackerWorkflow workflow, IRecentSettingsStore settingsStore)
@@ -64,6 +68,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<string> Errors { get; } = [];
     public ObservableCollection<string> Files { get; } = [];
     public ObservableCollection<string> LogLines { get; } = [];
+    public ObservableCollection<string> ResourcePaths { get; } = [];
 
     public string ResourcesPath
     {
@@ -72,11 +77,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _resourcesPath, value))
             {
-                EnsureDerivedPaths();
-                ResetPlanState();
-                RefreshCommands();
+                ReplaceResourceFolders(string.IsNullOrWhiteSpace(value) ? [] : [value]);
             }
         }
+    }
+
+    public string? SelectedResourcePath
+    {
+        get => _selectedResourcePath;
+        set => SetProperty(ref _selectedResourcePath, value);
     }
 
     public string OutputPath
@@ -86,10 +95,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _outputPath, value))
             {
-                _hasSuccessfulBuild = false;
-                RefreshCommands();
+                SetProperty(ref _generatedResourcesRoot, value, nameof(GeneratedResourcesRoot));
+                ResetPlanState();
             }
         }
+    }
+
+    public string GeneratedResourcesRoot
+    {
+        get => _generatedResourcesRoot;
+        set => OutputPath = value;
     }
 
     public string BackupRoot
@@ -220,6 +235,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         set => SetProperty(ref _savePlan, value);
     }
 
+    public bool CopyResourcesToOutputBeforeRename
+    {
+        get => _copyResourcesToOutputBeforeRename;
+        set
+        {
+            if (SetProperty(ref _copyResourcesToOutputBeforeRename, value))
+            {
+                ResetPlanState();
+            }
+        }
+    }
+
     public bool IsBusy
     {
         get => _isBusy;
@@ -283,6 +310,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool CanApplyPlan => CanApply();
     public bool CanRestoreBackup => CanRestore();
 
+    public int SelectedTabIndex
+    {
+        get => _selectedTabIndex;
+        set => SetProperty(ref _selectedTabIndex, value);
+    }
+
     public WorkflowSummary Summary
     {
         get => _summary;
@@ -294,28 +327,113 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public void SelectResourcesFolder(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        AddResourceFolders([path]);
+    }
+
+    public void AddResourceFolders(IEnumerable<string> paths)
+    {
+        var added = false;
+        foreach (var path in ExpandResourceFolderSelections(paths))
+        {
+            if (ResourcePaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            ResourcePaths.Add(path);
+            added = true;
+        }
+
+        if (!added)
         {
             return;
         }
 
-        ResourcesPath = path;
-        Status = "Resources folder selected. Run Analyze to preview changes.";
+        SyncResourcesPath();
+        EnsureDerivedPaths();
+        ResetPlanState();
+        Status = $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected. Run Analyze to preview changes.";
+    }
+
+    private static IReadOnlyList<string> ExpandResourceFolderSelections(IEnumerable<string> paths)
+    {
+        var resources = new List<string>();
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath))
+        {
+            if (!Directory.Exists(path))
+            {
+                continue;
+            }
+
+            if (IsResourceFolder(path))
+            {
+                resources.Add(path);
+                continue;
+            }
+
+            var childResources = Directory.GetDirectories(path)
+                .Where(IsResourceFolder)
+                .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            resources.AddRange(childResources.Count > 0 ? childResources : [path]);
+        }
+
+        return resources
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsResourceFolder(string path)
+        => File.Exists(Path.Combine(path, "fxmanifest.lua"))
+           || File.Exists(Path.Combine(path, "__resource.lua"));
+
+    public void RemoveSelectedResourceFolder()
+    {
+        if (SelectedResourcePath is null)
+        {
+            return;
+        }
+
+        ResourcePaths.Remove(SelectedResourcePath);
+        SelectedResourcePath = null;
+        SyncResourcesPath();
+        EnsureDerivedPaths();
+        ResetPlanState();
+        Status = ResourcePaths.Count == 0
+            ? "Select clothing resource folders to begin."
+            : $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected.";
+    }
+
+    public void ClearResourceFolders()
+    {
+        ResourcePaths.Clear();
+        SelectedResourcePath = null;
+        SyncResourcesPath();
+        ResetPlanState();
+        Status = "Select clothing resource folders to begin.";
     }
 
     public async Task ExportXmlAsync()
         => await RunOperationAsync("Exporting XML", async (progress, token) =>
         {
-            var result = await _workflow.ExportXmlAsync(ResourcesPath, OverwriteXml, progress, token);
+            var writtenFiles = new List<string>();
+            var skippedFiles = new List<string>();
+            foreach (var resourcePath in ResourcePaths)
+            {
+                var result = await _workflow.ExportXmlAsync(resourcePath, OverwriteXml, progress, token);
+                writtenFiles.AddRange(result.WrittenFiles);
+                skippedFiles.AddRange(result.SkippedFiles);
+            }
+
             Files.Clear();
-            foreach (var file in result.WrittenFiles.Concat(result.SkippedFiles))
+            foreach (var file in writtenFiles.Concat(skippedFiles))
             {
                 Files.Add(file);
             }
 
-            Summary = new WorkflowSummary(0, 0, 0, 0, 0, result.WrittenFiles.Count, result.SkippedFiles.Count);
+            Summary = new WorkflowSummary(0, 0, 0, 0, 0, writtenFiles.Count, skippedFiles.Count);
             SetSummaryLines("XML export", Summary);
-            Status = $"XML export complete. Wrote {result.WrittenFiles.Count} file(s), skipped {result.SkippedFiles.Count}.";
+            Status = $"XML export complete. Wrote {writtenFiles.Count} file(s), skipped {skippedFiles.Count}.";
         });
 
     public async Task AnalyzeAsync()
@@ -328,9 +446,10 @@ public sealed class MainWindowViewModel : ViewModelBase
                 MalePrefix = MalePrefix,
                 MaxDrawablesPerComponent = MaxDrawablesPerComponent,
                 MaxDrawablesPerProp = MaxDrawablesPerProp,
+                RenameStreamsInPlace = !CopyResourcesToOutputBeforeRename,
             };
 
-            var result = await _workflow.AnalyzeAsync(ResourcesPath, TargetResource, settings, progress, token);
+            var result = await _workflow.AnalyzeAsync(ResourcePaths.ToList(), OutputPath, TargetResource, settings, progress, token);
             _lastPlan = result.Plan;
             _hasSuccessfulBuild = false;
 
@@ -359,6 +478,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 result.Plan.Warnings.Count,
                 result.Plan.Errors.Count);
             SetSummaryLines("Analyze", Summary);
+            SelectedTabIndex = 1;
             Status = result.Plan.Errors.Count == 0
                 ? "Analyze complete. Build Preview is available."
                 : $"Analyze complete with {result.Plan.Errors.Count} error(s). Fix errors before build/apply.";
@@ -400,7 +520,10 @@ public sealed class MainWindowViewModel : ViewModelBase
                 throw new InvalidOperationException("Analyze must complete before applying.");
             }
 
-            var entries = await _workflow.ApplyAsync(_lastPlan, BackupRoot, progress, token);
+            var entries = await _workflow.ApplyAsync(_lastPlan, BackupRoot, new ApplyOptions
+            {
+                CopyResourcesToOutputBeforeRename = CopyResourcesToOutputBeforeRename,
+            }, progress, token);
             Summary = Summary with { BackupEntryCount = entries.Count };
             SetSummaryLines("Apply", Summary);
             Status = $"Apply complete. Created {entries.Count} backup manifest entr{(entries.Count == 1 ? "y" : "ies")}.";
@@ -421,7 +544,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     public bool CanRunWithResources()
-        => !IsBusy && Directory.Exists(ResourcesPath);
+        => !IsBusy && ResourcePaths.Count > 0 && ResourcePaths.All(Directory.Exists) && !string.IsNullOrWhiteSpace(OutputPath);
 
     public bool CanBuildPreview()
         => !IsBusy
@@ -504,6 +627,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             "process-source" => $"Analyzed {progress.Current}/{progress.Total} | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
             "write-target" => $"Built {progress.Current}/{progress.Total} target collections | files {progress.WrittenFileCount}{path}",
             "export-file" => $"Exported {progress.Current}/{progress.Total} | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
+            "copy-source-resource" => $"Copied {progress.Current}/{progress.Total} source resources{path}",
             "rename-stream" => $"Renamed {progress.Current}/{progress.Total} stream files{path}",
             "backup-source-ymt" => $"Backed up {progress.Current}/{progress.Total} source files{path}",
             "complete" => progress.Message ?? $"{progress.Operation} complete.",
@@ -513,15 +637,21 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     private void EnsureDerivedPaths()
     {
-        if (string.IsNullOrWhiteSpace(ResourcesPath))
+        if (ResourcePaths.Count == 0)
         {
             return;
         }
 
-        var parent = Directory.GetParent(ResourcesPath)?.FullName ?? ResourcesPath;
+        var firstResourcePath = ResourcePaths[0];
+        var parent = Directory.GetParent(firstResourcePath)?.FullName ?? firstResourcePath;
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
             OutputPath = parent;
+        }
+        else
+        {
+            _generatedResourcesRoot = OutputPath;
+            OnPropertyChanged(nameof(GeneratedResourcesRoot));
         }
 
         if (string.IsNullOrWhiteSpace(BackupRoot))
@@ -531,8 +661,28 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (string.IsNullOrWhiteSpace(PlanPath))
         {
-            PlanPath = Path.Combine(ResourcesPath, "plan.json");
+            PlanPath = Path.Combine(parent, "plan.json");
         }
+    }
+
+    private void ReplaceResourceFolders(IEnumerable<string> paths)
+    {
+        ResourcePaths.Clear();
+        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            ResourcePaths.Add(path);
+        }
+
+        SyncResourcesPath();
+        EnsureDerivedPaths();
+        ResetPlanState();
+        RefreshCommands();
+    }
+
+    private void SyncResourcesPath()
+    {
+        _resourcesPath = ResourcePaths.FirstOrDefault() ?? string.Empty;
+        OnPropertyChanged(nameof(ResourcesPath));
     }
 
     private void ResetPlanState()
@@ -577,8 +727,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         try
         {
             var settings = await _settingsStore.LoadAsync();
-            _resourcesPath = settings.ResourcesPath;
-            _outputPath = settings.OutputPath;
+            ReplaceResourceFolders(settings.ResourcePaths.Count > 0 ? settings.ResourcePaths : string.IsNullOrWhiteSpace(settings.ResourcesPath) ? [] : [settings.ResourcesPath]);
+            _outputPath = !string.IsNullOrWhiteSpace(settings.OutputPath)
+                ? settings.OutputPath
+                : settings.GeneratedResourcesRoot;
+            _generatedResourcesRoot = _outputPath;
             _backupRoot = settings.BackupRoot;
             _planPath = settings.PlanPath;
             _targetResource = settings.TargetResource;
@@ -591,6 +744,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             _includeDebugClient = settings.IncludeDebugClient;
             _overwriteXml = settings.OverwriteXml;
             _savePlan = settings.SavePlan;
+            _copyResourcesToOutputBeforeRename = settings.CopyResourcesToOutputBeforeRename;
             OnPropertyChanged(string.Empty);
             EnsureDerivedPaths();
             RefreshCommands();
@@ -605,7 +759,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         => await _settingsStore.SaveAsync(new RecentSettings
         {
             ResourcesPath = ResourcesPath,
+            ResourcePaths = ResourcePaths.ToList(),
             OutputPath = OutputPath,
+            GeneratedResourcesRoot = OutputPath,
             BackupRoot = BackupRoot,
             PlanPath = PlanPath,
             TargetResource = TargetResource,
@@ -618,6 +774,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             IncludeDebugClient = IncludeDebugClient,
             OverwriteXml = OverwriteXml,
             SavePlan = SavePlan,
+            CopyResourcesToOutputBeforeRename = CopyResourcesToOutputBeforeRename,
         });
 
     private void RefreshCommands()

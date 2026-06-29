@@ -54,7 +54,7 @@ ClothingRepacker.Cli analyze --resource <path_to_resource> [--resource <path_to_
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
-ClothingRepacker.Cli apply --plan <plan.json> --backup-root <folder>
+ClothingRepacker.Cli apply --plan <plan.json> --backup-root <folder> [--copy-resources-to-output]
 ClothingRepacker.Cli restore --backup-manifest <backup-manifest.json>
 ClothingRepacker.Cli validate --plan <plan.json>
 ClothingRepacker.Cli validate --resources <path>
@@ -137,11 +137,22 @@ ClothingRepacker.Cli apply \
   --backup-root ./backups
 ```
 
+To leave the source resources untouched, apply against a copied output set instead:
+
+```bash
+ClothingRepacker.Cli apply \
+  --plan plan.json \
+  --backup-root ./backups \
+  --copy-resources-to-output
+```
+
 `apply` does three important things:
 
 - Renames stream files according to the plan
 - Copies original source `.ymt` files into a timestamped backup folder, then removes them from the source resources
 - Creates the generated merged resource under the plan's generated root. For `--resources <parent>` plans this remains the sibling folder next to your resources root; for repeated `--resource` plans it is the `--generated-root` folder.
+
+With `--copy-resources-to-output`, `apply` first copies the source resource folders into the plan's generated root and performs the stream renames and source `.ymt` removals on those copies. Use an output root separate from the original resources.
 
 ## How to Undo What the Tool Did
 
