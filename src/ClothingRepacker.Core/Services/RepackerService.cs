@@ -38,7 +38,7 @@ public sealed class RepackerService
         var fullResourcesRoot = Path.GetFullPath(resourcesRoot);
         var generatedResourcesRoot = Path.GetDirectoryName(fullResourcesRoot) ?? fullResourcesRoot;
         return await AnalyzeAsync(
-            _scanner.ScanResources(fullResourcesRoot),
+            _scanner.ScanResources(fullResourcesRoot, progress, cancellationToken),
             fullResourcesRoot,
             generatedResourcesRoot,
             targetResource,
@@ -61,7 +61,7 @@ public sealed class RepackerService
 
         var fullGeneratedResourcesRoot = Path.GetFullPath(generatedResourcesRoot);
         return await AnalyzeAsync(
-            _scanner.ScanResourceFolders(resourceFolders),
+            _scanner.ScanResourceFolders(resourceFolders, progress, cancellationToken),
             fullGeneratedResourcesRoot,
             fullGeneratedResourcesRoot,
             targetResource,
@@ -523,7 +523,7 @@ public sealed class RepackerService
         var entries = new List<BackupEntry>();
         var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
         var pathMap = options.CopyResourcesToOutputBeforeRename
-            ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress)
+            ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken)
             : new ResourcePathMap([]);
 
         for (var index = 0; index < plan.StreamRenames.Count; index++)
@@ -613,7 +613,13 @@ public sealed class RepackerService
             Directory.Delete(generatedRoot, recursive: true);
         }
 
-        CopyDirectory(Path.Combine(buildResult.OutputRoot, plan.TargetResource), generatedRoot);
+        CopyDirectory(
+            Path.Combine(buildResult.OutputRoot, plan.TargetResource),
+            generatedRoot,
+            progress,
+            "apply",
+            "copy-generated-file",
+            cancellationToken);
         entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
 
         foreach (var standaloneResource in plan.StandaloneResources)
@@ -624,7 +630,13 @@ public sealed class RepackerService
                 Directory.Delete(standaloneGeneratedRoot, recursive: true);
             }
 
-            CopyDirectory(Path.Combine(buildResult.OutputRoot, standaloneResource.OutputResource), standaloneGeneratedRoot);
+            CopyDirectory(
+                Path.Combine(buildResult.OutputRoot, standaloneResource.OutputResource),
+                standaloneGeneratedRoot,
+                progress,
+                "apply",
+                "copy-generated-file",
+                cancellationToken);
             entries.Add(new BackupEntry("generated-resource", standaloneGeneratedRoot, null, standaloneGeneratedRoot, string.Empty, null, DateTimeOffset.UtcNow));
         }
 
@@ -661,21 +673,31 @@ public sealed class RepackerService
         IReadOnlyList<string> resourceRoots,
         string generatedResourcesRoot,
         List<BackupEntry> entries,
-        IProgress<OperationProgress>? progress)
+        IProgress<OperationProgress>? progress,
+        CancellationToken cancellationToken)
     {
         var mappings = new List<ResourceRootMapping>();
         for (var index = 0; index < resourceRoots.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var sourceRoot = Path.GetFullPath(resourceRoots[index]);
             var destinationRoot = Path.Combine(generatedResourcesRoot, Path.GetFileName(sourceRoot));
             ValidateResourceCopyDestination(sourceRoot, destinationRoot);
+
+            progress?.Report(new OperationProgress(
+                "apply",
+                "copy-source-resource",
+                index,
+                resourceRoots.Count,
+                sourceRoot,
+                $"Copying source resource {index + 1}/{resourceRoots.Count}: {Path.GetFileName(sourceRoot)}."));
 
             if (Directory.Exists(destinationRoot))
             {
                 Directory.Delete(destinationRoot, recursive: true);
             }
 
-            CopyDirectory(sourceRoot, destinationRoot);
+            CopyDirectory(sourceRoot, destinationRoot, progress, "apply", "copy-source-file", cancellationToken);
             DeleteMalformedCopiedStreamFiles(destinationRoot);
             mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
             entries.Add(new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, null, DateTimeOffset.UtcNow));
@@ -1403,17 +1425,36 @@ end, false)
         return Convert.ToHexString(hash);
     }
 
-    private static void CopyDirectory(string source, string destination)
+    private static void CopyDirectory(
+        string source,
+        string destination,
+        IProgress<OperationProgress>? progress = null,
+        string operation = "copy",
+        string stage = "copy-file",
+        CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(destination);
         foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(directory.Replace(source, destination, StringComparison.OrdinalIgnoreCase));
         }
 
-        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        for (var index = 0; index < files.Count; index++)
         {
-            File.Copy(file, file.Replace(source, destination, StringComparison.OrdinalIgnoreCase), overwrite: true);
+            cancellationToken.ThrowIfCancellationRequested();
+            var file = files[index];
+            var destinationFile = file.Replace(source, destination, StringComparison.OrdinalIgnoreCase);
+            File.Copy(file, destinationFile, overwrite: true);
+            progress?.Report(new OperationProgress(
+                operation,
+                stage,
+                index + 1,
+                files.Count,
+                destinationFile));
         }
     }
 

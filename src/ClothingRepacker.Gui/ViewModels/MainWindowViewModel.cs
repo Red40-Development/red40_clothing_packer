@@ -710,10 +710,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         return progress.Stage switch
         {
             "start" => progress.Message ?? $"{progress.Operation} started.",
+            "scan-resource" => progress.Message ?? $"Scanned {progress.Current}/{progress.Total} resources{path}",
             "process-source" => $"Analyzed {progress.Current}/{progress.Total} | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
             "write-target" => $"Built {progress.Current}/{progress.Total} target collections | files {progress.WrittenFileCount}{path}",
             "export-file" => $"Exported {progress.Current}/{progress.Total} | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
             "copy-source-resource" => $"Copied {progress.Current}/{progress.Total} source resources{path}",
+            "copy-source-file" => $"Copied {progress.Current}/{progress.Total} source files{path}",
+            "copy-generated-file" => $"Copied {progress.Current}/{progress.Total} generated files{path}",
             "rename-stream" => $"Renamed {progress.Current}/{progress.Total} stream files{path}",
             "backup-source-ymt" => $"Backed up {progress.Current}/{progress.Total} source files{path}",
             "complete" => progress.Message ?? $"{progress.Operation} complete.",

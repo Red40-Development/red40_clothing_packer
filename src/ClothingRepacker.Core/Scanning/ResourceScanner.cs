@@ -6,7 +6,10 @@ public sealed class ResourceScanner
 {
     private static readonly string[] StreamExtensions = [".ydd", ".ytd", ".yld", ".ymt", ".xml"];
 
-    public IReadOnlyList<ResourceScanItem> ScanResources(string resourcesRoot)
+    public IReadOnlyList<ResourceScanItem> ScanResources(
+        string resourcesRoot,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var root = Path.GetFullPath(resourcesRoot);
         if (!Directory.Exists(root))
@@ -19,15 +22,36 @@ public sealed class ResourceScanner
             .ToList();
 
         var results = new List<ResourceScanItem>();
-        foreach (var resourceDir in directories)
+        for (var index = 0; index < directories.Count; index++)
         {
-            results.Add(ScanResourceFolder(resourceDir));
+            cancellationToken.ThrowIfCancellationRequested();
+            var resourceDir = directories[index];
+            progress?.Report(new OperationProgress(
+                "analyze",
+                "scan-resource",
+                index,
+                directories.Count,
+                resourceDir,
+                $"Scanning resource {index + 1}/{directories.Count}: {Path.GetFileName(resourceDir)}."));
+
+            results.Add(ScanResourceFolder(resourceDir, cancellationToken));
+
+            progress?.Report(new OperationProgress(
+                "analyze",
+                "scan-resource",
+                index + 1,
+                directories.Count,
+                resourceDir,
+                $"Scanned resource {index + 1}/{directories.Count}: {Path.GetFileName(resourceDir)}."));
         }
 
         return results;
     }
 
-    public IReadOnlyList<ResourceScanItem> ScanResourceFolders(IEnumerable<string> resourceFolders)
+    public IReadOnlyList<ResourceScanItem> ScanResourceFolders(
+        IEnumerable<string> resourceFolders,
+        IProgress<OperationProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var roots = new List<string>();
         var seenRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -40,25 +64,44 @@ public sealed class ResourceScanner
         }
 
         var results = new List<ResourceScanItem>();
-        foreach (var root in roots)
+        for (var index = 0; index < roots.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            var root = roots[index];
             if (!Directory.Exists(root))
             {
                 throw new DirectoryNotFoundException(root);
             }
 
-            results.Add(ScanResourceFolder(root));
+            progress?.Report(new OperationProgress(
+                "analyze",
+                "scan-resource",
+                index,
+                roots.Count,
+                root,
+                $"Scanning resource {index + 1}/{roots.Count}: {Path.GetFileName(root)}."));
+
+            results.Add(ScanResourceFolder(root, cancellationToken));
+
+            progress?.Report(new OperationProgress(
+                "analyze",
+                "scan-resource",
+                index + 1,
+                roots.Count,
+                root,
+                $"Scanned resource {index + 1}/{roots.Count}: {Path.GetFileName(root)}."));
         }
 
         return results;
     }
 
-    private static ResourceScanItem ScanResourceFolder(string resourceDir)
+    private static ResourceScanItem ScanResourceFolder(string resourceDir, CancellationToken cancellationToken)
     {
         var resourceName = Path.GetFileName(resourceDir);
         var files = Directory.GetFiles(resourceDir, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        cancellationToken.ThrowIfCancellationRequested();
 
         return new ResourceScanItem(
             resourceName,
