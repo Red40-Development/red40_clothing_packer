@@ -172,6 +172,33 @@ public class GuiWorkflowTests
     }
 
     [Fact]
+    public async Task MovingResourceFoldersUpdatesAnalyzeOrder()
+    {
+        var first = CreateTempDirectory("gui-resource-order-first");
+        var second = CreateTempDirectory("gui-resource-order-second");
+        var third = CreateTempDirectory("gui-resource-order-third");
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(third, "fxmanifest.lua"), "fx_version 'cerulean'");
+        var workflow = new FakeWorkflow();
+        var vm = CreateViewModel(workflow);
+
+        vm.AddResourceFolders([first, second, third]);
+        vm.SelectedResourcePath = third;
+        vm.MoveSelectedResourceFolderUp();
+        vm.MoveSelectedResourceFolderUp();
+
+        Assert.Equal([third, first, second], vm.ResourcePaths.ToArray());
+        Assert.Equal(third, vm.ResourcesPath);
+        Assert.False(vm.CanMoveResourceUp);
+        Assert.True(vm.CanMoveResourceDown);
+
+        await vm.AnalyzeAsync();
+
+        Assert.Equal([third, first, second], workflow.AnalyzeResourceFolders);
+    }
+
+    [Fact]
     public void AddingResourcesRootExpandsImmediateChildrenWithManifests()
     {
         var root = CreateTempDirectory("gui-resource-root");

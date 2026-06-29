@@ -52,6 +52,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         ApplyCommand = new AsyncRelayCommand(ApplyAsync, CanApply);
         RestoreCommand = new AsyncRelayCommand(RestoreAsync, CanRestore);
         CancelCommand = new RelayCommand(CancelOperation, () => IsBusy);
+        MoveResourceUpCommand = new RelayCommand(MoveSelectedResourceFolderUp, CanMoveSelectedResourceFolderUp);
+        MoveResourceDownCommand = new RelayCommand(MoveSelectedResourceFolderDown, CanMoveSelectedResourceFolderDown);
 
         _ = LoadSettingsAsync();
     }
@@ -62,6 +64,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand ApplyCommand { get; }
     public AsyncRelayCommand RestoreCommand { get; }
     public RelayCommand CancelCommand { get; }
+    public RelayCommand MoveResourceUpCommand { get; }
+    public RelayCommand MoveResourceDownCommand { get; }
 
     public ObservableCollection<string> SummaryLines { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
@@ -85,7 +89,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string? SelectedResourcePath
     {
         get => _selectedResourcePath;
-        set => SetProperty(ref _selectedResourcePath, value);
+        set
+        {
+            if (SetProperty(ref _selectedResourcePath, value))
+            {
+                RefreshCommands();
+            }
+        }
     }
 
     public string OutputPath
@@ -309,6 +319,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool CanBuildPreviewPlan => CanBuildPreview();
     public bool CanApplyPlan => CanApply();
     public bool CanRestoreBackup => CanRestore();
+    public bool CanMoveResourceUp => CanMoveSelectedResourceFolderUp();
+    public bool CanMoveResourceDown => CanMoveSelectedResourceFolderDown();
 
     public int SelectedTabIndex
     {
@@ -429,6 +441,16 @@ public sealed class MainWindowViewModel : ViewModelBase
         Status = ResourcePaths.Count == 0
             ? "Select clothing resource folders to begin."
             : $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected.";
+    }
+
+    public void MoveSelectedResourceFolderUp()
+    {
+        MoveSelectedResourceFolder(-1);
+    }
+
+    public void MoveSelectedResourceFolderDown()
+    {
+        MoveSelectedResourceFolder(1);
     }
 
     public void ClearResourceFolders()
@@ -588,6 +610,43 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public bool CanRestore()
         => !IsBusy && File.Exists(RestoreManifestPath);
+
+    private bool CanMoveSelectedResourceFolderUp()
+        => !IsBusy
+           && SelectedResourcePath is not null
+           && ResourcePaths.IndexOf(SelectedResourcePath) > 0;
+
+    private bool CanMoveSelectedResourceFolderDown()
+    {
+        if (IsBusy || SelectedResourcePath is null)
+        {
+            return false;
+        }
+
+        var index = ResourcePaths.IndexOf(SelectedResourcePath);
+        return index >= 0 && index < ResourcePaths.Count - 1;
+    }
+
+    private void MoveSelectedResourceFolder(int offset)
+    {
+        if (SelectedResourcePath is not { } selected)
+        {
+            return;
+        }
+
+        var oldIndex = ResourcePaths.IndexOf(selected);
+        var newIndex = oldIndex + offset;
+        if (oldIndex < 0 || newIndex < 0 || newIndex >= ResourcePaths.Count)
+        {
+            return;
+        }
+
+        ResourcePaths.Move(oldIndex, newIndex);
+        SelectedResourcePath = selected;
+        SyncResourcesPath();
+        ResetPlanState();
+        Status = "Resource order updated. Run Analyze to preview changes.";
+    }
 
     private async Task RunOperationAsync(string status, Func<IProgress<OperationProgress>, CancellationToken, Task> operation)
     {
@@ -812,11 +871,15 @@ public sealed class MainWindowViewModel : ViewModelBase
         ApplyCommand.RaiseCanExecuteChanged();
         RestoreCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
+        MoveResourceUpCommand.RaiseCanExecuteChanged();
+        MoveResourceDownCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(PlannedBackupCount));
         OnPropertyChanged(nameof(CanExportXml));
         OnPropertyChanged(nameof(CanAnalyzeResources));
         OnPropertyChanged(nameof(CanBuildPreviewPlan));
         OnPropertyChanged(nameof(CanApplyPlan));
         OnPropertyChanged(nameof(CanRestoreBackup));
+        OnPropertyChanged(nameof(CanMoveResourceUp));
+        OnPropertyChanged(nameof(CanMoveResourceDown));
     }
 }

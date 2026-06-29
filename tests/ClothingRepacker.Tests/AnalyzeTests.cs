@@ -182,6 +182,24 @@ public class AnalyzeTests
         Assert.Equal(2, analyze.Plan.ResourceRoots.Count);
     }
 
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersPreservesInputOrder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-order-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var first = Path.Combine(resources, "z_pack");
+        var second = Path.Combine(resources, "a_pack");
+        Directory.CreateDirectory(Path.Combine(first, "stream"));
+        Directory.CreateDirectory(Path.Combine(second, "stream"));
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "fxmanifest.lua"), "fx_version 'cerulean'");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([first, second], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], analyze.Plan.ResourceRoots);
+    }
+
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
         => new(
             new XElement("CPedVariationInfo",

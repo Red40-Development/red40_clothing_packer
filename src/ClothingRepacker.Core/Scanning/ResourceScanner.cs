@@ -29,12 +29,15 @@ public sealed class ResourceScanner
 
     public IReadOnlyList<ResourceScanItem> ScanResourceFolders(IEnumerable<string> resourceFolders)
     {
-        var roots = resourceFolders
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var roots = new List<string>();
+        var seenRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in resourceFolders.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath))
+        {
+            if (seenRoots.Add(root))
+            {
+                roots.Add(root);
+            }
+        }
 
         var results = new List<ResourceScanItem>();
         foreach (var root in roots)

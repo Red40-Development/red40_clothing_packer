@@ -111,12 +111,14 @@
         <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
           <TabItem Header="Resources">
             <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="2">
-              <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,*" ColumnSpacing="8">
+              <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
                 <Button Grid.Column="0" Content="Add Resource..." Click="BrowseResources_Click" />
                 <Button Grid.Column="1" Content="Remove" Click="RemoveResource_Click" />
                 <Button Grid.Column="2" Content="Clear" Click="ClearResources_Click" />
-                <TextBlock Grid.Column="3"
-                           Text="Select a resource folder or a root containing resource folders."
+                <Button Grid.Column="3" Content="Move Up" Command="{Binding MoveResourceUpCommand}" IsEnabled="{Binding CanMoveResourceUp}" />
+                <Button Grid.Column="4" Content="Move Down" Command="{Binding MoveResourceDownCommand}" IsEnabled="{Binding CanMoveResourceDown}" />
+                <TextBlock Grid.Column="5"
+                           Text="Top-to-bottom order is used for merge analysis."
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
               </Grid>
