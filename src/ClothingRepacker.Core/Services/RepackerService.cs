@@ -676,6 +676,7 @@ public sealed class RepackerService
             }
 
             CopyDirectory(sourceRoot, destinationRoot);
+            DeleteMalformedCopiedStreamFiles(destinationRoot);
             mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
             entries.Add(new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, null, DateTimeOffset.UtcNow));
 
@@ -1414,6 +1415,37 @@ end, false)
         {
             File.Copy(file, file.Replace(source, destination, StringComparison.OrdinalIgnoreCase), overwrite: true);
         }
+    }
+
+    private static void DeleteMalformedCopiedStreamFiles(string resourceRoot)
+    {
+        foreach (var file in Directory.GetFiles(resourceRoot, "*", SearchOption.AllDirectories))
+        {
+            if (IsMalformedCopiedStreamFile(file))
+            {
+                File.Delete(file);
+            }
+        }
+    }
+
+    private static bool IsMalformedCopiedStreamFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        if (!extension.Equals(".ydd", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".ytd", StringComparison.OrdinalIgnoreCase)
+            && !extension.Equals(".yld", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var caretIndex = stem.IndexOf('^');
+        return caretIndex > 0 && !stem[..caretIndex].Contains('_', StringComparison.Ordinal);
     }
 
     private sealed record ResourceRootMapping(string SourceRoot, string DestinationRoot);

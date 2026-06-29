@@ -106,7 +106,9 @@ public class ApplyRestoreTests
 
         var originalYmt = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
         var originalDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        var malformedDrawable = Path.Combine(resourceRoot, "stream", "bigb^decl_000_u.ydd");
         await File.WriteAllTextAsync(originalDrawable, "drawable");
+        await File.WriteAllTextAsync(malformedDrawable, "malformed");
 
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
@@ -119,11 +121,14 @@ public class ApplyRestoreTests
         var copiedResource = Path.Combine(generatedRoot, "gang_flags");
         var copiedYmt = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
         var copiedDrawable = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        var copiedMalformedDrawable = Path.Combine(copiedResource, "stream", "bigb^decl_000_u.ydd");
 
         Assert.True(File.Exists(originalYmt));
         Assert.True(File.Exists(originalDrawable));
+        Assert.True(File.Exists(malformedDrawable));
         Assert.False(File.Exists(copiedYmt));
         Assert.False(File.Exists(copiedDrawable));
+        Assert.False(File.Exists(copiedMalformedDrawable));
         Assert.True(Directory.Exists(copiedResource));
         Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
         Assert.Contains(entries, entry => entry.Kind == "stream-rename" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
