@@ -103,6 +103,19 @@ public sealed record BackupEntry(
     string? Sha256After,
     DateTimeOffset CreatedAtUtc);
 
+public sealed record RestoreManifestPreview(
+    string ManifestPath,
+    IReadOnlyList<BackupEntry> Entries,
+    IReadOnlyList<RestoreAction> Actions,
+    IReadOnlyList<RestoreAction> SkippedActions);
+
+public sealed record RestoreAction(
+    string Kind,
+    string Description,
+    string? SourcePath,
+    string? DestinationPath,
+    BackupEntry Entry);
+
 public sealed record OldYmtBackupPlan(
     string SourcePath,
     string BackupPath);

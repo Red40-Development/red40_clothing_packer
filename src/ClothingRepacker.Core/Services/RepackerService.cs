@@ -799,49 +799,156 @@ public sealed class RepackerService
     private static string NormalizePath(string path)
         => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-    public async Task RestoreAsync(string backupManifestPath, CancellationToken cancellationToken = default)
+    public async Task<RestoreManifestPreview> LoadRestoreManifestPreviewAsync(string backupManifestPath, CancellationToken cancellationToken = default)
     {
+        var entries = await LoadBackupEntriesAsync(backupManifestPath, cancellationToken);
+        var (actions, skippedActions) = PlanRestoreActions(entries);
+        return new RestoreManifestPreview(Path.GetFullPath(backupManifestPath), entries, actions, skippedActions);
+    }
 
-        var entries = JsonSerializer.Deserialize<List<BackupEntry>>(await File.ReadAllTextAsync(backupManifestPath, cancellationToken), _jsonOptions)
-            ?? throw new InvalidDataException("Invalid backup manifest.");
+    public async Task RestoreAsync(string backupManifestPath, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var preview = await LoadRestoreManifestPreviewAsync(backupManifestPath, cancellationToken);
+        var actions = preview.Actions;
 
+        progress?.Report(new OperationProgress(
+            "restore",
+            "start",
+            Total: actions.Count,
+            Message: $"Preparing to restore {actions.Count} action(s) from {preview.ManifestPath}."));
+
+        var completed = 0;
+        foreach (var action in actions.Where(action => action.Kind == "delete-generated-resource"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action.DestinationPath is not null && Directory.Exists(action.DestinationPath))
+            {
+                Directory.Delete(action.DestinationPath, recursive: true);
+            }
+
+            completed++;
+            progress?.Report(new OperationProgress(
+                "restore",
+                "delete-generated-resource",
+                completed,
+                actions.Count,
+                action.DestinationPath,
+                $"Removed generated resource {action.DestinationPath}."));
+        }
+
+        foreach (var action in actions.Where(action => action.Kind == "copy-backup-file"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action.SourcePath is null || action.DestinationPath is null)
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(action.DestinationPath)!);
+            File.Copy(action.SourcePath, action.DestinationPath, overwrite: true);
+
+            completed++;
+            progress?.Report(new OperationProgress(
+                "restore",
+                "copy-backup-file",
+                completed,
+                actions.Count,
+                action.DestinationPath,
+                $"Restored {action.DestinationPath} from {action.SourcePath}."));
+        }
+
+        foreach (var action in actions.Where(action => action.Kind == "move-stream-file"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (action.SourcePath is null || action.DestinationPath is null || !File.Exists(action.SourcePath))
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(action.DestinationPath)!);
+            File.Move(action.SourcePath, action.DestinationPath, overwrite: true);
+
+            completed++;
+            progress?.Report(new OperationProgress(
+                "restore",
+                "move-stream-file",
+                completed,
+                actions.Count,
+                action.DestinationPath,
+                $"Moved {action.SourcePath} back to {action.DestinationPath}."));
+        }
+
+        progress?.Report(new OperationProgress(
+            "restore",
+            "complete",
+            actions.Count,
+            actions.Count,
+            Message: $"Restore complete. Applied {completed} action(s)."));
+    }
+
+    private async Task<List<BackupEntry>> LoadBackupEntriesAsync(string backupManifestPath, CancellationToken cancellationToken)
+        => JsonSerializer.Deserialize<List<BackupEntry>>(await File.ReadAllTextAsync(backupManifestPath, cancellationToken), _jsonOptions)
+           ?? throw new InvalidDataException("Invalid backup manifest.");
+
+    private static (IReadOnlyList<RestoreAction> Actions, IReadOnlyList<RestoreAction> SkippedActions) PlanRestoreActions(IReadOnlyList<BackupEntry> entries)
+    {
         var generatedRoots = entries
             .Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null)
             .Select(entry => entry.AppliedPath!)
             .ToList();
 
-        foreach (var generatedRoot in generatedRoots)
+        var actions = new List<RestoreAction>();
+        var skippedActions = new List<RestoreAction>();
+
+        foreach (var entry in entries.Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null))
         {
-            if (Directory.Exists(generatedRoot))
-            {
-                Directory.Delete(generatedRoot, recursive: true);
-            }
+            actions.Add(new RestoreAction(
+                "delete-generated-resource",
+                $"Remove generated resource {entry.AppliedPath}",
+                null,
+                entry.AppliedPath,
+                entry));
         }
 
         foreach (var entry in entries.Where(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"))
         {
+            var action = new RestoreAction(
+                "copy-backup-file",
+                $"Restore {entry.OriginalPath} from {entry.BackupPath}",
+                entry.BackupPath,
+                entry.OriginalPath,
+                entry);
+
             if (entry.BackupPath is null || IsUnderAnyRoot(entry.OriginalPath, generatedRoots))
             {
+                skippedActions.Add(action);
                 continue;
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(entry.OriginalPath)!);
-            File.Copy(entry.BackupPath, entry.OriginalPath, overwrite: true);
+            actions.Add(action);
         }
 
         foreach (var entry in entries.Where(entry => entry.Kind == "stream-rename"))
         {
+            var action = new RestoreAction(
+                "move-stream-file",
+                $"Move {entry.AppliedPath} back to {entry.OriginalPath}",
+                entry.AppliedPath,
+                entry.OriginalPath,
+                entry);
+
             if (entry.AppliedPath is null
                 || IsUnderAnyRoot(entry.OriginalPath, generatedRoots)
-                || IsUnderAnyRoot(entry.AppliedPath, generatedRoots)
-                || !File.Exists(entry.AppliedPath))
+                || IsUnderAnyRoot(entry.AppliedPath, generatedRoots))
             {
+                skippedActions.Add(action);
                 continue;
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(entry.OriginalPath)!);
-            File.Move(entry.AppliedPath, entry.OriginalPath, overwrite: true);
+            actions.Add(action);
         }
+
+        return (actions, skippedActions);
     }
 
     public IReadOnlyList<string> ValidatePlan(MergePlan plan) => _planValidator.Validate(plan);
