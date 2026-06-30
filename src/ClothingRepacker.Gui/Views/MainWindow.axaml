@@ -17,11 +17,17 @@
           <TextBlock Text="Manage resource folders in the Resources tab."
                      Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>
-        <StackPanel Grid.Column="1" Grid.RowSpan="3" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
-          <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
-          <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
-          <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
-          <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+        <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+          <Image Source="avares://ClothingRepacker.Gui/Assets/red40_logo.png"
+                 Height="72"
+                 Stretch="UniformToFill"
+                 HorizontalAlignment="Right" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
+            <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
+            <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
+            <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+          </StackPanel>
         </StackPanel>
         <TextBlock Grid.Column="0"
                    Grid.Row="1"

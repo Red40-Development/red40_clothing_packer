@@ -9,6 +9,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaResource Include="..\..\assets\red40_logo.png" Link="Assets\red40_logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ClothingRepacker.Core\ClothingRepacker.Core.csproj" />
     <ProjectReference Include="..\ClothingRepacker.CodeWalker\ClothingRepacker.CodeWalker.csproj" />
   </ItemGroup>
