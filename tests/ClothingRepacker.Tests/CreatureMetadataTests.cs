@@ -24,7 +24,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var expected = XDocument.Load(TestFixturePaths.Ymt("mp_creaturemetadata.ymt.xml"));
         var femaleMetadataPath = Path.Combine(
@@ -126,7 +129,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var metadataPath = Path.Combine(
             outputRoot,
@@ -151,7 +157,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         Assert.Equal(2, analyze.Plan.SourceCreatureMetadata.Count);
 
@@ -181,7 +190,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var metadataPath = Path.Combine(
             outputRoot,
@@ -243,7 +255,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var metadataPath = Path.Combine(
             outputRoot,
@@ -270,7 +285,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var metadataPath = Path.Combine(
             outputRoot,
@@ -296,7 +314,10 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         var metadataPath = Path.Combine(
             outputRoot,

@@ -121,7 +121,10 @@ public class AnalyzeTests
         });
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         Assert.Empty(analyze.Plan.Errors);
         Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("will be split across 2 target collections", StringComparison.OrdinalIgnoreCase));
