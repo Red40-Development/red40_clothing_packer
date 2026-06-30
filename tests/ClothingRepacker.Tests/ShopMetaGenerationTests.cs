@@ -14,7 +14,9 @@ public class ShopMetaGenerationTests
         var root = Path.Combine(Path.GetTempPath(), $"shop-meta-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         var resources = Path.Combine(root, "resources");
-        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
+        var gangFlagsResource = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), gangFlagsResource);
+        DeleteShopMetaFiles(gangFlagsResource);
 
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
@@ -141,4 +143,12 @@ public class ShopMetaGenerationTests
                             new XElement("Item", new XElement("texId", new XAttribute("value", 1)))))),
                 new XElement("aAnchors", new XAttribute("itemType", "CAnchorProps"))),
             new XElement("dlcName", "hash_00000000"));
+
+    private static void DeleteShopMetaFiles(string resourceRoot)
+    {
+        foreach (var path in Directory.GetFiles(resourceRoot, "*.meta", SearchOption.AllDirectories))
+        {
+            File.Delete(path);
+        }
+    }
 }
