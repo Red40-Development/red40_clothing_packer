@@ -78,7 +78,7 @@ public class AnalyzeTests
     }
 
     [Fact]
-    public async Task AnalyzeAndBuildCopyNonFreemodePedsIntoStandaloneResource()
+    public async Task AnalyzeAndBuildSkipsNonFreemodePeds()
     {
         var root = Path.Combine(Path.GetTempPath(), $"non-freemode-standalone-test-{Guid.NewGuid():N}");
         var resources = Path.Combine(root, "resources");
@@ -96,13 +96,11 @@ public class AnalyzeTests
 
         var build = await service.BuildAsync(analyze.Plan, outputRoot);
 
-        var standalone = Assert.Single(analyze.Plan.StandaloneResources);
         Assert.Empty(analyze.Plan.TargetCollections);
-        Assert.Equal("zz_merged_clothing_meta_standalone_animal_pack", standalone.OutputResource);
-        Assert.Contains(standalone.Files, file => file.SourcePath == ymtPath);
-        Assert.Contains(standalone.Files, file => file.SourcePath == drawablePath);
-        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack.ymt.xml", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack^uppr_000_u.ydd", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(analyze.Plan.StandaloneResources);
+        Assert.Empty(build.WrittenFiles);
+        Assert.False(Directory.Exists(Path.Combine(outputRoot, "zz_merged_clothing_meta")));
+        Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("Non-freemode YMT skipped", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

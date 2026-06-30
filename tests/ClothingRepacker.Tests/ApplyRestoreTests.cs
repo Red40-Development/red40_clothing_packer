@@ -44,7 +44,7 @@ public class ApplyRestoreTests
     }
 
     [Fact]
-    public async Task ApplyLeavesNonFreemodeSourceFilesUnmodifiedAndCreatesStandaloneResource()
+    public async Task ApplyLeavesNonFreemodeSourceFilesUnmodifiedWhenCopyModeIsOff()
     {
         var root = Path.Combine(Path.GetTempPath(), $"non-freemode-apply-test-{Guid.NewGuid():N}");
         var resources = Path.Combine(root, "resources");
@@ -69,9 +69,40 @@ public class ApplyRestoreTests
         Assert.Equal(ymtBefore, await File.ReadAllTextAsync(sourceYmt));
         Assert.Equal(drawableBefore, await File.ReadAllTextAsync(sourceDrawable));
         Assert.DoesNotContain(entries, entry => entry.Kind == "old-ymt");
-        Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack")));
-        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack", "stream", "a_c_horse_01_horse_pack.ymt.xml")));
-        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack", "stream", "a_c_horse_01_horse_pack^uppr_000_u.ydd")));
+        Assert.False(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
+        Assert.False(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack")));
+    }
+
+    [Fact]
+    public async Task ApplyCopiesNonFreemodeSourceResourceToGeneratedRootWhenCopyModeIsOn()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"non-freemode-copy-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "animal_pack");
+        var stream = Path.Combine(resourceRoot, "stream");
+        Directory.CreateDirectory(stream);
+
+        var sourceYmt = Path.Combine(stream, "a_c_horse_01_horse_pack.ymt.xml");
+        var sourceDrawable = Path.Combine(stream, "a_c_horse_01_horse_pack^uppr_000_u.ydd");
+        BuildMinimalPedVariationXml("horse_pack").Save(sourceYmt);
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "animal_pack");
+        Assert.True(File.Exists(sourceYmt));
+        Assert.True(File.Exists(sourceDrawable));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "a_c_horse_01_horse_pack.ymt.xml")));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "a_c_horse_01_horse_pack^uppr_000_u.ydd")));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+        Assert.Contains(entries, entry => entry.Kind == "generated-resource" && entry.AppliedPath == copiedResource);
     }
 
     [Fact]
@@ -128,7 +159,7 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(malformedDrawable));
         Assert.False(File.Exists(copiedYmt));
         Assert.False(File.Exists(copiedDrawable));
-        Assert.False(File.Exists(copiedMalformedDrawable));
+        Assert.True(File.Exists(copiedMalformedDrawable));
         Assert.True(Directory.Exists(copiedResource));
         Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
         Assert.Contains(entries, entry => entry.Kind == "stream-rename" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));

@@ -174,7 +174,11 @@ public sealed class RepackerService
             ErrorCount: errors.Count));
 
         var mergeableSources = sources.Where(IsMergeableFreemodeSource).ToList();
-        var standaloneResources = BuildStandaloneResourcePlans(sources.Except(mergeableSources).ToList(), streamFiles, targetResource, warnings);
+        foreach (var source in sources.Except(mergeableSources))
+        {
+            warnings.Add($"{source.YmtPath}: Non-freemode YMT skipped. It will only be copied to the generated resources root when copy-before-rename apply mode is enabled.");
+        }
+
         var targets = _mergePlanner.Plan(mergeableSources, settings, warnings, errors);
         var drawableMappings = new List<DrawableMapping>();
         var propMappings = new List<PropMapping>();
@@ -257,7 +261,7 @@ public sealed class RepackerService
                 source.Components.ToDictionary(component => component.ComponentId, component => component.Drawables.Count),
                 source.Props.ToDictionary(prop => prop.AnchorId, prop => prop.Props.Count))).ToList(),
             TargetCollections = targetPlans,
-            StandaloneResources = standaloneResources.ToList(),
+            StandaloneResources = [],
             DrawableMappings = drawableMappings,
             PropMappings = propMappings,
             StreamRenames = streamRenames.ToList(),
@@ -369,17 +373,20 @@ public sealed class RepackerService
                 WrittenFileCount: writtenFiles.Count));
         }
 
-        var fxmanifestPath = Path.Combine(fullOutputRoot, plan.TargetResource, "fxmanifest.lua");
-        Directory.CreateDirectory(Path.GetDirectoryName(fxmanifestPath)!);
-        await File.WriteAllTextAsync(fxmanifestPath, BuildFxManifest(plan, options), cancellationToken);
-        writtenFiles.Add(fxmanifestPath);
-
-        if (options.IncludeDebugClient)
+        if (plan.TargetCollections.Count > 0)
         {
-            var validationPath = Path.Combine(fullOutputRoot, plan.TargetResource, "client", "validate_collections.lua");
-            Directory.CreateDirectory(Path.GetDirectoryName(validationPath)!);
-            await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
-            writtenFiles.Add(validationPath);
+            var fxmanifestPath = Path.Combine(fullOutputRoot, plan.TargetResource, "fxmanifest.lua");
+            Directory.CreateDirectory(Path.GetDirectoryName(fxmanifestPath)!);
+            await File.WriteAllTextAsync(fxmanifestPath, BuildFxManifest(plan, options), cancellationToken);
+            writtenFiles.Add(fxmanifestPath);
+
+            if (options.IncludeDebugClient)
+            {
+                var validationPath = Path.Combine(fullOutputRoot, plan.TargetResource, "client", "validate_collections.lua");
+                Directory.CreateDirectory(Path.GetDirectoryName(validationPath)!);
+                await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
+                writtenFiles.Add(validationPath);
+            }
         }
 
         foreach (var standaloneResource in plan.StandaloneResources)
@@ -607,20 +614,23 @@ public sealed class RepackerService
                 BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
         }
 
-        var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
-        if (Directory.Exists(generatedRoot))
+        if (plan.TargetCollections.Count > 0)
         {
-            Directory.Delete(generatedRoot, recursive: true);
-        }
+            var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
+            if (Directory.Exists(generatedRoot))
+            {
+                Directory.Delete(generatedRoot, recursive: true);
+            }
 
-        CopyDirectory(
-            Path.Combine(buildResult.OutputRoot, plan.TargetResource),
-            generatedRoot,
-            progress,
-            "apply",
-            "copy-generated-file",
-            cancellationToken);
-        entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
+            CopyDirectory(
+                Path.Combine(buildResult.OutputRoot, plan.TargetResource),
+                generatedRoot,
+                progress,
+                "apply",
+                "copy-generated-file",
+                cancellationToken);
+            entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
+        }
 
         foreach (var standaloneResource in plan.StandaloneResources)
         {
@@ -643,7 +653,9 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "copy-generated-resource",
-            Message: $"Copied generated resource to {generatedRoot}.",
+            Message: plan.TargetCollections.Count > 0
+                ? $"Copied generated resource to {Path.Combine(generatedResourcesRoot, plan.TargetResource)}."
+                : "No merged freemode resource was generated.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
             BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"),
             WrittenFileCount: buildResult.WrittenFiles.Count));
@@ -698,7 +710,6 @@ public sealed class RepackerService
             }
 
             CopyDirectory(sourceRoot, destinationRoot, progress, "apply", "copy-source-file", cancellationToken);
-            DeleteMalformedCopiedStreamFiles(destinationRoot);
             mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
             entries.Add(new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, null, DateTimeOffset.UtcNow));
 
@@ -1456,37 +1467,6 @@ end, false)
                 files.Count,
                 destinationFile));
         }
-    }
-
-    private static void DeleteMalformedCopiedStreamFiles(string resourceRoot)
-    {
-        foreach (var file in Directory.GetFiles(resourceRoot, "*", SearchOption.AllDirectories))
-        {
-            if (IsMalformedCopiedStreamFile(file))
-            {
-                File.Delete(file);
-            }
-        }
-    }
-
-    private static bool IsMalformedCopiedStreamFile(string path)
-    {
-        var extension = Path.GetExtension(path);
-        if (!extension.Equals(".ydd", StringComparison.OrdinalIgnoreCase)
-            && !extension.Equals(".ytd", StringComparison.OrdinalIgnoreCase)
-            && !extension.Equals(".yld", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var stem = Path.GetFileNameWithoutExtension(path);
-        var caretIndex = stem.IndexOf('^');
-        return caretIndex > 0 && !stem[..caretIndex].Contains('_', StringComparison.Ordinal);
     }
 
     private sealed record ResourceRootMapping(string SourceRoot, string DestinationRoot);
