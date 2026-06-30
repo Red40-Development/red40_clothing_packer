@@ -148,6 +148,33 @@ public class GuiWorkflowTests
     }
 
     [Fact]
+    public async Task LoadingRestoreManifestPopulatesRestorePreview()
+    {
+        var root = CreateTempDirectory("gui-restore-preview");
+        var manifest = Path.Combine(root, "backup-manifest.json");
+        File.WriteAllText(manifest, "[]");
+        var backup = Path.Combine(root, "backups", "source.ymt");
+        var original = Path.Combine(root, "resources", "source.ymt");
+        var workflow = new FakeWorkflow
+        {
+            RestorePreview = new RestoreManifestPreview(
+                manifest,
+                [new BackupEntry("old-ymt", original, backup, null, "before", "after", DateTimeOffset.UtcNow)],
+                [new RestoreAction("copy-backup-file", "Restore source", backup, original, new BackupEntry("old-ymt", original, backup, null, "before", "after", DateTimeOffset.UtcNow))],
+                []),
+        };
+        var vm = CreateViewModel(workflow);
+
+        vm.RestoreManifestPath = manifest;
+        await WaitForAsync(() => vm.HasRestoreManifestPreview);
+
+        Assert.Equal(5, vm.SelectedTabIndex);
+        Assert.Contains(vm.RestoreSummaryLines, line => line == "Actions: 1");
+        Assert.Contains(vm.RestoreActionLines, line => line.Contains($"{backup} -> {original}", StringComparison.Ordinal));
+        Assert.Contains("Actions: 1", vm.RestoreSummaryText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AddRemoveAndClearResourceFoldersUpdatesAvailability()
     {
         var first = CreateTempDirectory("gui-resource-first");
@@ -309,6 +336,15 @@ public class GuiWorkflowTests
         return path;
     }
 
+    private static async Task WaitForAsync(Func<bool> condition)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (!condition())
+        {
+            await Task.Delay(10, cts.Token);
+        }
+    }
+
     private sealed class FakeSettingsStore : IRecentSettingsStore
     {
         private readonly RecentSettings _settings;
@@ -336,6 +372,7 @@ public class GuiWorkflowTests
         public bool BlockExportUntilCanceled { get; init; }
         public AnalyzeResult AnalyzeResult { get; init; } = BuildAnalyzeResult(errorCount: 0, warningCount: 0);
         public BuildResult BuildResult { get; init; } = new(Path.GetTempPath(), []);
+        public RestoreManifestPreview RestorePreview { get; init; } = new(string.Empty, [], [], []);
 
         public async Task<ExportXmlResult> ExportXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         {
@@ -377,7 +414,10 @@ public class GuiWorkflowTests
             return Task.FromResult<IReadOnlyList<BackupEntry>>([]);
         }
 
-        public Task RestoreAsync(string backupManifestPath, CancellationToken cancellationToken)
+        public Task<RestoreManifestPreview> LoadRestoreManifestPreviewAsync(string backupManifestPath, CancellationToken cancellationToken)
+            => Task.FromResult(RestorePreview with { ManifestPath = backupManifestPath });
+
+        public Task RestoreAsync(string backupManifestPath, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
             => Task.CompletedTask;
     }
 }
