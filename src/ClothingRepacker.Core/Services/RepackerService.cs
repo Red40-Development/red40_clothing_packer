@@ -526,7 +526,11 @@ public sealed class RepackerService
             "apply",
             "build-staging",
             Message: "Building generated resource into a staging folder."));
-        var buildResult = await BuildAsync(plan, stagingRoot, options: null, progress, cancellationToken);
+        var buildResult = await BuildAsync(plan, stagingRoot, new BuildOptions
+        {
+            IncludeYmtXml = options.IncludeYmtXml,
+            IncludeDebugClient = options.IncludeDebugClient,
+        }, progress, cancellationToken);
         var entries = new List<BackupEntry>();
         var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
         var pathMap = options.CopyResourcesToOutputBeforeRename

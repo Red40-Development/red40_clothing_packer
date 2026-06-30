@@ -235,8 +235,8 @@ public sealed record AnalyzeResult(
 
 public sealed record BuildOptions
 {
-    public bool IncludeYmtXml { get; init; } = true;
-    public bool IncludeDebugClient { get; init; } = true;
+    public bool IncludeYmtXml { get; init; } = false;
+    public bool IncludeDebugClient { get; init; } = false;
 }
 
 public sealed record BuildResult(
@@ -246,6 +246,8 @@ public sealed record BuildResult(
 public sealed record ApplyOptions
 {
     public bool CopyResourcesToOutputBeforeRename { get; init; }
+    public bool IncludeYmtXml { get; init; } = false;
+    public bool IncludeDebugClient { get; init; } = false;
 }
 
 public sealed record ExportXmlResult(

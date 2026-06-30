@@ -655,6 +655,8 @@ public sealed class MainWindowViewModel : ViewModelBase
             var entries = await _workflow.ApplyAsync(_lastPlan, BackupRoot, new ApplyOptions
             {
                 CopyResourcesToOutputBeforeRename = CopyResourcesToOutputBeforeRename,
+                IncludeYmtXml = IncludeYmtXml,
+                IncludeDebugClient = IncludeDebugClient,
             }, progress, token);
             Summary = Summary with { BackupEntryCount = entries.Count };
             SetSummaryLines("Apply", Summary);

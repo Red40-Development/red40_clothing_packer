@@ -127,6 +127,34 @@ public class ApplyRestoreTests
     }
 
     [Fact]
+    public async Task ApplyHonorsGeneratedOutputIncludeOptions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"apply-include-options-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var sourceDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            IncludeYmtXml = false,
+            IncludeDebugClient = false,
+        });
+
+        var generatedResource = Path.Combine(generatedRoot, "zz_merged_clothing_meta");
+        Assert.True(Directory.Exists(generatedResource));
+        Assert.Empty(Directory.GetFiles(generatedResource, "*.xml", SearchOption.AllDirectories));
+        Assert.False(File.Exists(Path.Combine(generatedResource, "client", "validate_collections.lua")));
+        Assert.DoesNotContain("client_script", await File.ReadAllTextAsync(Path.Combine(generatedResource, "fxmanifest.lua")));
+    }
+
+    [Fact]
     public async Task ApplyCanCopyResourcesToOutputBeforeRenaming()
     {
         var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-apply-test-{Guid.NewGuid():N}");

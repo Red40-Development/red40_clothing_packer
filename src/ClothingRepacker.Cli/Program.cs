@@ -128,6 +128,8 @@ public static class ProgramEntry
         var applyOptions = new ApplyOptions
         {
             CopyResourcesToOutputBeforeRename = options.ContainsKey("--copy-resources-to-output") || !plan.Settings.RenameStreamsInPlace,
+            IncludeYmtXml = ParseBool(options.GetValueOrDefault("--include-ymt-xml"), fallback: true),
+            IncludeDebugClient = ParseBool(options.GetValueOrDefault("--include-debug-client"), fallback: true),
         };
         var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"), applyOptions, CreateConsoleProgress(progressWriter));
         progressWriter.CompleteLine();
@@ -226,6 +228,7 @@ clothing-repacker analyze --resource <path> [--resource <path> ...] --generated-
 clothing-repacker build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker apply --plan <plan.json> --backup-root <folder> [--copy-resources-to-output]
+  [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>

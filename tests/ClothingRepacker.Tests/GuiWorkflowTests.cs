@@ -108,6 +108,8 @@ public class GuiWorkflowTests
 
         Assert.False(workflow.AnalyzeSettings.RenameStreamsInPlace);
         Assert.True(workflow.ApplyOptions.CopyResourcesToOutputBeforeRename);
+        Assert.False(workflow.ApplyOptions.IncludeYmtXml);
+        Assert.False(workflow.ApplyOptions.IncludeDebugClient);
     }
 
     [Fact]
