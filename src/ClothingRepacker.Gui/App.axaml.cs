@@ -18,11 +18,11 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var settingsStore = new RecentSettingsStore();
+            var projectStore = new ProjectStore();
             var workflow = new WorkflowRunner(new RepackerServiceFactory());
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(workflow, settingsStore)
+                DataContext = new MainWindowViewModel(workflow, projectStore)
             };
         }
 

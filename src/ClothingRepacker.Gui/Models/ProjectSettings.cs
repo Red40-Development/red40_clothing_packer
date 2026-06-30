@@ -1,6 +1,6 @@
 namespace ClothingRepacker.Gui.Models;
 
-public sealed class RecentSettings
+public sealed class ProjectSettings
 {
     public string ResourcesPath { get; set; } = string.Empty;
     public List<string> ResourcePaths { get; set; } = [];

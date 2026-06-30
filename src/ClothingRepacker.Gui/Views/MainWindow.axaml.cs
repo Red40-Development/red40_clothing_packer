@@ -32,6 +32,47 @@ public partial class MainWindow : Window
     private void ClearResources_Click(object? sender, RoutedEventArgs e)
         => ViewModel?.ClearResourceFolders();
 
+    private async void OpenProject_Click(object? sender, RoutedEventArgs e)
+    {
+        var path = await OpenFileAsync("Open project", "Project files", ["json"]);
+        if (path is not null && ViewModel is { } vm)
+        {
+            await vm.LoadProjectAsync(path);
+        }
+    }
+
+    private async void SaveProject_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not { } vm)
+        {
+            return;
+        }
+
+        if (vm.HasCurrentProject)
+        {
+            await vm.SaveCurrentProjectAsync();
+            return;
+        }
+
+        await SaveProjectAsAsync(vm);
+    }
+
+    private async void SaveProjectAs_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is { } vm)
+        {
+            await SaveProjectAsAsync(vm);
+        }
+    }
+
+    private async void ClearProject_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is { } vm)
+        {
+            await vm.ClearProjectAsync();
+        }
+    }
+
     private async void BrowseOutput_Click(object? sender, RoutedEventArgs e)
     {
         var path = await PickFolderAsync("Select output root folder");
@@ -205,6 +246,15 @@ public partial class MainWindow : Window
         });
 
         return file?.Path.LocalPath;
+    }
+
+    private async Task SaveProjectAsAsync(MainWindowViewModel vm)
+    {
+        var path = await SaveFileAsync("Save project", "clothing-repacker-project.json");
+        if (path is not null)
+        {
+            await vm.SaveProjectAsync(path);
+        }
     }
 
     private async Task<bool> ConfirmApplyAsync(MainWindowViewModel vm)

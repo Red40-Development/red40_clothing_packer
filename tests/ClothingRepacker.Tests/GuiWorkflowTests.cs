@@ -275,29 +275,55 @@ public class GuiWorkflowTests
     }
 
     [Fact]
-    public async Task RecentSettingsMigratesOldResourcesPathAndPersistsResourceList()
+    public async Task LastProjectLoadsAndOpenProjectPersistsResourceList()
     {
         var root = CreateTempDirectory("gui-settings-root");
         var generatedRoot = CreateTempDirectory("gui-settings-generated");
-        var settingsStore = new FakeSettingsStore(new RecentSettings
+        var settingsStore = new FakeSettingsStore(new ProjectSettings
         {
-            ResourcesPath = root,
+            ResourcePaths = [root],
             GeneratedResourcesRoot = generatedRoot,
-        });
+        }, "/tmp/project.json");
         var vm = new MainWindowViewModel(new FakeWorkflow(), settingsStore);
 
         await Task.Delay(50);
 
         Assert.Equal([root], vm.ResourcePaths.ToArray());
         Assert.Equal(generatedRoot, vm.GeneratedResourcesRoot);
+        Assert.Equal("/tmp/project.json", vm.CurrentProjectPath);
 
         await vm.AnalyzeAsync();
 
-        Assert.Equal([root], settingsStore.LastSaved.ResourcePaths);
-        Assert.Equal(generatedRoot, settingsStore.LastSaved.GeneratedResourcesRoot);
-        Assert.False(settingsStore.LastSaved.IncludeYmtXml);
-        Assert.False(settingsStore.LastSaved.IncludeDebugClient);
-        Assert.True(settingsStore.LastSaved.CopyResourcesToOutputBeforeRename);
+        Assert.Equal("/tmp/project.json", settingsStore.LastSavedProjectPath);
+        Assert.Equal([root], settingsStore.LastSavedProject.ResourcePaths);
+        Assert.Equal(generatedRoot, settingsStore.LastSavedProject.GeneratedResourcesRoot);
+        Assert.False(settingsStore.LastSavedProject.IncludeYmtXml);
+        Assert.False(settingsStore.LastSavedProject.IncludeDebugClient);
+        Assert.True(settingsStore.LastSavedProject.CopyResourcesToOutputBeforeRename);
+    }
+
+    [Fact]
+    public async Task ClearProjectRestoresDefaultsAndForgetsLastProject()
+    {
+        var root = CreateTempDirectory("gui-clear-project");
+        var settingsStore = new FakeSettingsStore(new ProjectSettings
+        {
+            ResourcePaths = [root],
+            TargetResource = "custom_target",
+            SavePlan = false,
+            CopyResourcesToOutputBeforeRename = false,
+        }, "/tmp/project.json");
+        var vm = new MainWindowViewModel(new FakeWorkflow(), settingsStore);
+
+        await Task.Delay(50);
+        await vm.ClearProjectAsync();
+
+        Assert.Empty(vm.CurrentProjectPath);
+        Assert.Empty(vm.ResourcePaths);
+        Assert.Equal("zz_merged_clothing_meta", vm.TargetResource);
+        Assert.True(vm.SavePlan);
+        Assert.True(vm.CopyResourcesToOutputBeforeRename);
+        Assert.Null(settingsStore.LastSavedLastProjectPath);
     }
 
     private static MainWindowViewModel CreateViewModel(FakeWorkflow? workflow = null)
@@ -345,23 +371,38 @@ public class GuiWorkflowTests
         }
     }
 
-    private sealed class FakeSettingsStore : IRecentSettingsStore
+    private sealed class FakeSettingsStore : IProjectStore
     {
-        private readonly RecentSettings _settings;
+        private readonly ProjectSettings _settings;
+        private readonly string _projectPath;
 
-        public FakeSettingsStore(RecentSettings? settings = null)
+        public FakeSettingsStore(ProjectSettings? settings = null, string projectPath = "")
         {
-            _settings = settings ?? new RecentSettings();
+            _settings = settings ?? new ProjectSettings();
+            _projectPath = projectPath;
         }
 
-        public RecentSettings LastSaved { get; private set; } = new();
+        public string LastSavedProjectPath { get; private set; } = string.Empty;
+        public string? LastSavedLastProjectPath { get; private set; }
+        public ProjectSettings LastSavedProject { get; private set; } = new();
 
-        public Task<RecentSettings> LoadAsync(CancellationToken cancellationToken = default)
+        public Task<ProjectLoadResult> LoadLastProjectAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ProjectLoadResult(_settings, _projectPath));
+
+        public Task<ProjectSettings> LoadProjectAsync(string projectPath, CancellationToken cancellationToken = default)
             => Task.FromResult(_settings);
 
-        public Task SaveAsync(RecentSettings settings, CancellationToken cancellationToken = default)
+        public Task SaveProjectAsync(string projectPath, ProjectSettings settings, CancellationToken cancellationToken = default)
         {
-            LastSaved = settings;
+            LastSavedProjectPath = projectPath;
+            LastSavedProject = settings;
+            LastSavedLastProjectPath = projectPath;
+            return Task.CompletedTask;
+        }
+
+        public Task SaveLastProjectPathAsync(string? projectPath, CancellationToken cancellationToken = default)
+        {
+            LastSavedLastProjectPath = projectPath;
             return Task.CompletedTask;
         }
     }

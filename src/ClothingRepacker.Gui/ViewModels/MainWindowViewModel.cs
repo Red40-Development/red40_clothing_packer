@@ -9,11 +9,12 @@ namespace ClothingRepacker.Gui.ViewModels;
 public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly IRepackerWorkflow _workflow;
-    private readonly IRecentSettingsStore _settingsStore;
+    private readonly IProjectStore _projectStore;
     private CancellationTokenSource? _operationCts;
     private MergePlan? _lastPlan;
     private bool _hasSuccessfulBuild;
 
+    private string _currentProjectPath = string.Empty;
     private string _resourcesPath = string.Empty;
     private string? _selectedResourcePath;
     private string _outputPath = string.Empty;
@@ -46,10 +47,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<string> _restoreActionLines = [];
     private string _restoreSummaryText = string.Empty;
 
-    public MainWindowViewModel(IRepackerWorkflow workflow, IRecentSettingsStore settingsStore)
+    public MainWindowViewModel(IRepackerWorkflow workflow, IProjectStore projectStore)
     {
         _workflow = workflow;
-        _settingsStore = settingsStore;
+        _projectStore = projectStore;
 
         ExportXmlCommand = new AsyncRelayCommand(ExportXmlAsync, CanRunWithResources);
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, CanRunWithResources);
@@ -60,7 +61,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MoveResourceUpCommand = new RelayCommand(MoveSelectedResourceFolderUp, CanMoveSelectedResourceFolderUp);
         MoveResourceDownCommand = new RelayCommand(MoveSelectedResourceFolderDown, CanMoveSelectedResourceFolderDown);
 
-        _ = LoadSettingsAsync();
+        _ = LoadLastProjectAsync();
     }
 
     public AsyncRelayCommand ExportXmlCommand { get; }
@@ -78,6 +79,26 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<string> Files { get; } = [];
     public ObservableCollection<string> LogLines { get; } = [];
     public ObservableCollection<string> ResourcePaths { get; } = [];
+
+    public string CurrentProjectPath
+    {
+        get => _currentProjectPath;
+        private set
+        {
+            if (SetProperty(ref _currentProjectPath, value))
+            {
+                OnPropertyChanged(nameof(ProjectDisplayName));
+                OnPropertyChanged(nameof(HasCurrentProject));
+            }
+        }
+    }
+
+    public string ProjectDisplayName => string.IsNullOrWhiteSpace(CurrentProjectPath)
+        ? "Unsaved project"
+        : Path.GetFileNameWithoutExtension(CurrentProjectPath);
+
+    public bool HasCurrentProject => !string.IsNullOrWhiteSpace(CurrentProjectPath);
+
     public IReadOnlyList<string> RestoreSummaryLines
     {
         get => _restoreSummaryLines;
@@ -350,6 +371,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool CanRestoreBackup => CanRestore();
     public bool CanMoveResourceUp => CanMoveSelectedResourceFolderUp();
     public bool CanMoveResourceDown => CanMoveSelectedResourceFolderDown();
+    public bool CanEditProject => !IsBusy;
 
     public int SelectedTabIndex
     {
@@ -618,6 +640,69 @@ public sealed class MainWindowViewModel : ViewModelBase
             await LoadRestoreManifestPreviewAsync(RestoreManifestPath, updateStatus: false);
         });
 
+    public async Task LoadProjectAsync(string projectPath)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = await _projectStore.LoadProjectAsync(projectPath);
+            ApplyProjectSettings(settings, projectPath);
+            await _projectStore.SaveLastProjectPathAsync(projectPath);
+            Status = $"Project loaded: {Path.GetFileName(projectPath)}";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+            Errors.Add(ex.Message);
+            LogLines.Add($"Could not load project: {ex.Message}");
+        }
+    }
+
+    public async Task SaveProjectAsync(string projectPath)
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        try
+        {
+            await _projectStore.SaveProjectAsync(projectPath, CreateProjectSettings());
+            CurrentProjectPath = projectPath;
+            Status = $"Project saved: {Path.GetFileName(projectPath)}";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+            Errors.Add(ex.Message);
+            LogLines.Add($"Could not save project: {ex.Message}");
+        }
+    }
+
+    public async Task SaveCurrentProjectAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(CurrentProjectPath))
+        {
+            await SaveProjectAsync(CurrentProjectPath);
+        }
+    }
+
+    public async Task ClearProjectAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        ApplyProjectSettings(new ProjectSettings(), string.Empty);
+        await _projectStore.SaveLastProjectPathAsync(null);
+        Status = "Project cleared. Defaults restored.";
+    }
+
     public void CancelOperation()
     {
         _operationCts?.Cancel();
@@ -699,7 +784,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         try
         {
             await operation(progress, _operationCts.Token);
-            await SaveSettingsAsync();
+            await SaveOpenProjectAsync();
         }
         catch (OperationCanceledException)
         {
@@ -948,41 +1033,32 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private async Task LoadSettingsAsync()
+    private async Task LoadLastProjectAsync()
     {
         try
         {
-            var settings = await _settingsStore.LoadAsync();
-            ReplaceResourceFolders(settings.ResourcePaths.Count > 0 ? settings.ResourcePaths : string.IsNullOrWhiteSpace(settings.ResourcesPath) ? [] : [settings.ResourcesPath]);
-            _outputPath = !string.IsNullOrWhiteSpace(settings.OutputPath)
-                ? settings.OutputPath
-                : settings.GeneratedResourcesRoot;
-            _generatedResourcesRoot = _outputPath;
-            _backupRoot = settings.BackupRoot;
-            _planPath = settings.PlanPath;
-            _targetResource = settings.TargetResource;
-            _targetPrefix = settings.TargetPrefix;
-            _femalePrefix = settings.FemalePrefix;
-            _malePrefix = settings.MalePrefix;
-            _maxDrawablesPerComponent = settings.MaxDrawablesPerComponent;
-            _maxDrawablesPerProp = settings.MaxDrawablesPerProp;
-            _includeYmtXml = settings.IncludeYmtXml;
-            _includeDebugClient = settings.IncludeDebugClient;
-            _overwriteXml = settings.OverwriteXml;
-            _savePlan = settings.SavePlan;
-            _copyResourcesToOutputBeforeRename = settings.CopyResourcesToOutputBeforeRename;
-            OnPropertyChanged(string.Empty);
-            EnsureDerivedPaths();
-            RefreshCommands();
+            var project = await _projectStore.LoadLastProjectAsync();
+            ApplyProjectSettings(project.Settings, project.ProjectPath);
+            Status = string.IsNullOrWhiteSpace(project.ProjectPath)
+                ? Status
+                : $"Project loaded: {Path.GetFileName(project.ProjectPath)}";
         }
         catch (Exception ex)
         {
-            LogLines.Add($"Could not load recent settings: {ex.Message}");
+            LogLines.Add($"Could not load project: {ex.Message}");
         }
     }
 
-    private async Task SaveSettingsAsync()
-        => await _settingsStore.SaveAsync(new RecentSettings
+    private async Task SaveOpenProjectAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(CurrentProjectPath))
+        {
+            await _projectStore.SaveProjectAsync(CurrentProjectPath, CreateProjectSettings());
+        }
+    }
+
+    private ProjectSettings CreateProjectSettings()
+        => new()
         {
             ResourcesPath = ResourcesPath,
             ResourcePaths = ResourcePaths.ToList(),
@@ -1001,7 +1077,35 @@ public sealed class MainWindowViewModel : ViewModelBase
             OverwriteXml = OverwriteXml,
             SavePlan = SavePlan,
             CopyResourcesToOutputBeforeRename = CopyResourcesToOutputBeforeRename,
-        });
+        };
+
+    private void ApplyProjectSettings(ProjectSettings settings, string projectPath)
+    {
+        ReplaceResourceFolders(settings.ResourcePaths.Count > 0 ? settings.ResourcePaths : string.IsNullOrWhiteSpace(settings.ResourcesPath) ? [] : [settings.ResourcesPath]);
+        _outputPath = !string.IsNullOrWhiteSpace(settings.OutputPath)
+            ? settings.OutputPath
+            : settings.GeneratedResourcesRoot;
+        _generatedResourcesRoot = _outputPath;
+        _backupRoot = settings.BackupRoot;
+        _planPath = settings.PlanPath;
+        _restoreManifestPath = string.Empty;
+        _targetResource = settings.TargetResource;
+        _targetPrefix = settings.TargetPrefix;
+        _femalePrefix = settings.FemalePrefix;
+        _malePrefix = settings.MalePrefix;
+        _maxDrawablesPerComponent = settings.MaxDrawablesPerComponent;
+        _maxDrawablesPerProp = settings.MaxDrawablesPerProp;
+        _includeYmtXml = settings.IncludeYmtXml;
+        _includeDebugClient = settings.IncludeDebugClient;
+        _overwriteXml = settings.OverwriteXml;
+        _savePlan = settings.SavePlan;
+        _copyResourcesToOutputBeforeRename = settings.CopyResourcesToOutputBeforeRename;
+        CurrentProjectPath = projectPath;
+        ResetPlanState();
+        OnPropertyChanged(string.Empty);
+        EnsureDerivedPaths();
+        RefreshCommands();
+    }
 
     private void RefreshCommands()
     {
@@ -1021,5 +1125,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(CanRestoreBackup));
         OnPropertyChanged(nameof(CanMoveResourceUp));
         OnPropertyChanged(nameof(CanMoveResourceDown));
+        OnPropertyChanged(nameof(CanEditProject));
+        OnPropertyChanged(nameof(HasCurrentProject));
     }
 }
