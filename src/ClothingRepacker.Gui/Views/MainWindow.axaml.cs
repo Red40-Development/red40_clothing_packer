@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using ClothingRepacker.Gui.ViewModels;
+using System.Diagnostics;
 
 namespace ClothingRepacker.Gui.Views;
 
@@ -120,6 +121,26 @@ public partial class MainWindow : Window
         if (confirmed)
         {
             await vm.ApplyAsync();
+        }
+    }
+
+    private async void UpdateAvailable_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not { UpdateReleaseUrl.Length: > 0 } vm)
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(vm.UpdateReleaseUrl)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync("Could not open update", ex.Message);
         }
     }
 

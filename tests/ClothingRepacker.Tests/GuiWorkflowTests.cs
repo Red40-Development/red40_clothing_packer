@@ -1,3 +1,4 @@
+using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Gui.Models;
 using ClothingRepacker.Gui.Services;
@@ -326,6 +327,22 @@ public class GuiWorkflowTests
         Assert.Null(settingsStore.LastSavedLastProjectPath);
     }
 
+    [Fact]
+    public async Task UpdateCheckShowsAvailableReleaseLink()
+    {
+        var updateChecker = new FakeUpdateChecker(new VersionCheckResult(
+            AppVersion.FromInformationalVersion("1.0.0"),
+            AppVersion.FromInformationalVersion("1.0.1"),
+            "https://example.test/releases/1.0.1"));
+        var vm = new MainWindowViewModel(new FakeWorkflow(), new FakeSettingsStore(), updateChecker);
+
+        await WaitForAsync(() => vm.IsUpdateAvailable);
+
+        Assert.True(vm.IsUpdateAvailable);
+        Assert.Equal("https://example.test/releases/1.0.1", vm.UpdateReleaseUrl);
+        Assert.Contains("latest 1.0.1", vm.VersionCheckText);
+    }
+
     private static MainWindowViewModel CreateViewModel(FakeWorkflow? workflow = null)
         => new(workflow ?? new FakeWorkflow(), new FakeSettingsStore());
 
@@ -460,5 +477,18 @@ public class GuiWorkflowTests
 
         public Task RestoreAsync(string backupManifestPath, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class FakeUpdateChecker : IUpdateChecker
+    {
+        private readonly VersionCheckResult? _result;
+
+        public FakeUpdateChecker(VersionCheckResult? result)
+        {
+            _result = result;
+        }
+
+        public Task<VersionCheckResult?> CheckAsync(AppVersion currentVersion, CancellationToken cancellationToken)
+            => Task.FromResult(_result);
     }
 }

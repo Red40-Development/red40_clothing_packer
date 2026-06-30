@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Reflection;
 using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Gui.Models;
@@ -10,6 +11,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 {
     private readonly IRepackerWorkflow _workflow;
     private readonly IProjectStore _projectStore;
+    private readonly IUpdateChecker? _updateChecker;
     private CancellationTokenSource? _operationCts;
     private MergePlan? _lastPlan;
     private bool _hasSuccessfulBuild;
@@ -35,6 +37,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _copyResourcesToOutputBeforeRename = true;
     private bool _isBusy;
     private string _status = "Select clothing resource folders to begin.";
+    private string _versionCheckText;
+    private string _updateReleaseUrl = string.Empty;
+    private bool _isUpdateAvailable;
     private string _currentStage = "Idle";
     private string _activePath = string.Empty;
     private int _progressCurrent;
@@ -47,10 +52,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<string> _restoreActionLines = [];
     private string _restoreSummaryText = string.Empty;
 
-    public MainWindowViewModel(IRepackerWorkflow workflow, IProjectStore projectStore)
+    public MainWindowViewModel(IRepackerWorkflow workflow, IProjectStore projectStore, IUpdateChecker? updateChecker = null)
     {
         _workflow = workflow;
         _projectStore = projectStore;
+        _updateChecker = updateChecker;
+        CurrentVersion = AppVersion.FromInformationalVersion(
+            typeof(MainWindowViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+        _versionCheckText = $"Version {CurrentVersion.Display}";
 
         ExportXmlCommand = new AsyncRelayCommand(ExportXmlAsync, CanRunWithResources);
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, CanRunWithResources);
@@ -62,6 +71,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MoveResourceDownCommand = new RelayCommand(MoveSelectedResourceFolderDown, CanMoveSelectedResourceFolderDown);
 
         _ = LoadLastProjectAsync();
+        _ = CheckForUpdatesAsync();
     }
 
     public AsyncRelayCommand ExportXmlCommand { get; }
@@ -79,6 +89,26 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<string> Files { get; } = [];
     public ObservableCollection<string> LogLines { get; } = [];
     public ObservableCollection<string> ResourcePaths { get; } = [];
+
+    public AppVersion CurrentVersion { get; }
+
+    public string VersionCheckText
+    {
+        get => _versionCheckText;
+        private set => SetProperty(ref _versionCheckText, value);
+    }
+
+    public bool IsUpdateAvailable
+    {
+        get => _isUpdateAvailable;
+        private set => SetProperty(ref _isUpdateAvailable, value);
+    }
+
+    public string UpdateReleaseUrl
+    {
+        get => _updateReleaseUrl;
+        private set => SetProperty(ref _updateReleaseUrl, value);
+    }
 
     public string CurrentProjectPath
     {
@@ -1046,6 +1076,39 @@ public sealed class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             LogLines.Add($"Could not load project: {ex.Message}");
+        }
+    }
+
+    private async Task CheckForUpdatesAsync()
+    {
+        if (_updateChecker is null)
+        {
+            return;
+        }
+
+        VersionCheckText = $"Version {CurrentVersion.Display} - checking for updates";
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            var result = await _updateChecker.CheckAsync(CurrentVersion, cts.Token);
+            if (result is { IsUpdateAvailable: true })
+            {
+                VersionCheckText = $"Version {CurrentVersion.Display} - latest {result.LatestVersion.Display}";
+                UpdateReleaseUrl = result.ReleaseUrl;
+                IsUpdateAvailable = true;
+                return;
+            }
+
+            VersionCheckText = $"Version {CurrentVersion.Display} - up to date";
+            IsUpdateAvailable = false;
+            UpdateReleaseUrl = string.Empty;
+        }
+        catch
+        {
+            VersionCheckText = $"Version {CurrentVersion.Display} - update check unavailable";
+            IsUpdateAvailable = false;
+            UpdateReleaseUrl = string.Empty;
         }
     }
 

@@ -14,6 +14,23 @@
           <TextBlock Classes="section-title" Text="Red40 Clothing Repacker" />
           <TextBlock Text="{Binding ProjectDisplayName}"
                      Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="{Binding VersionCheckText}"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+            <Button Click="UpdateAvailable_Click"
+                    IsVisible="{Binding IsUpdateAvailable}"
+                    MinHeight="0"
+                    Padding="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    ToolTip.Tip="{Binding UpdateReleaseUrl}">
+              <TextBlock Text="Update Available"
+                         TextDecorations="Underline"
+                         Foreground="#2B6CB0" />
+            </Button>
+          </StackPanel>
           <TextBlock Text="Manage resource folders in the Resources tab."
                      Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>

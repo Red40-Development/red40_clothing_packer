@@ -22,7 +22,7 @@ public partial class App : Application
             var workflow = new WorkflowRunner(new RepackerServiceFactory());
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(workflow, projectStore)
+                DataContext = new MainWindowViewModel(workflow, projectStore, new GitHubUpdateChecker())
             };
         }
 
