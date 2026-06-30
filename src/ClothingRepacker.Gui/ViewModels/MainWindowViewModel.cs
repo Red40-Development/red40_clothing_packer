@@ -40,6 +40,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private int _progressTotal;
     private int _selectedTabIndex;
     private WorkflowSummary _summary = new(0, 0, 0, 0, 0);
+    private RestoreManifestPreview? _restorePreview;
+    private int _restoreManifestLoadVersion;
+    private IReadOnlyList<string> _restoreSummaryLines = [];
+    private IReadOnlyList<string> _restoreActionLines = [];
+    private string _restoreSummaryText = string.Empty;
 
     public MainWindowViewModel(IRepackerWorkflow workflow, IRecentSettingsStore settingsStore)
     {
@@ -73,6 +78,29 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<string> Files { get; } = [];
     public ObservableCollection<string> LogLines { get; } = [];
     public ObservableCollection<string> ResourcePaths { get; } = [];
+    public IReadOnlyList<string> RestoreSummaryLines
+    {
+        get => _restoreSummaryLines;
+        private set
+        {
+            if (SetProperty(ref _restoreSummaryLines, value))
+            {
+                RefreshRestoreText();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> RestoreActionLines
+    {
+        get => _restoreActionLines;
+        private set => SetProperty(ref _restoreActionLines, value);
+    }
+
+    public string RestoreSummaryText
+    {
+        get => _restoreSummaryText;
+        private set => SetProperty(ref _restoreSummaryText, value);
+    }
 
     public string ResourcesPath
     {
@@ -142,6 +170,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _restoreManifestPath, value))
             {
+                _ = LoadRestoreManifestPreviewAsync(value);
                 RefreshCommands();
             }
         }
@@ -333,6 +362,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _summary;
         private set => SetProperty(ref _summary, value);
     }
+
+    public bool HasRestoreManifestPreview => _restorePreview is not null;
 
     public int PlannedBackupCount => (_lastPlan?.TargetCollections.SelectMany(target => target.SourceYmts).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0)
         + (_lastPlan?.BrokenCreatureMetadataBackups.Count ?? 0);
@@ -579,11 +610,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         });
 
     public async Task RestoreAsync()
-        => await RunOperationAsync("Restoring backup", async (_, token) =>
+        => await RunOperationAsync("Restoring backup", async (progress, token) =>
         {
-            await _workflow.RestoreAsync(RestoreManifestPath, token);
+            await _workflow.RestoreAsync(RestoreManifestPath, progress, token);
             Status = "Restore complete.";
             LogLines.Add($"Restored from {RestoreManifestPath}");
+            await LoadRestoreManifestPreviewAsync(RestoreManifestPath, updateStatus: false);
         });
 
     public void CancelOperation()
@@ -719,10 +751,115 @@ public sealed class MainWindowViewModel : ViewModelBase
             "copy-generated-file" => $"Copied {progress.Current}/{progress.Total} generated files{path}",
             "rename-stream" => $"Renamed {progress.Current}/{progress.Total} stream files{path}",
             "backup-source-ymt" => $"Backed up {progress.Current}/{progress.Total} source files{path}",
+            "delete-generated-resource" => progress.Message ?? $"Removed generated resource {progress.Current}/{progress.Total}{path}",
+            "copy-backup-file" => progress.Message ?? $"Restored backup file {progress.Current}/{progress.Total}{path}",
+            "move-stream-file" => progress.Message ?? $"Moved stream file {progress.Current}/{progress.Total}{path}",
             "complete" => progress.Message ?? $"{progress.Operation} complete.",
             _ => progress.Message ?? $"{progress.Operation}: {progress.Stage}{path}",
         };
     }
+
+    private async Task LoadRestoreManifestPreviewAsync(string manifestPath, bool updateStatus = true)
+    {
+        var version = ++_restoreManifestLoadVersion;
+        RestoreSummaryLines = [];
+        RestoreActionLines = [];
+        _restorePreview = null;
+        OnPropertyChanged(nameof(HasRestoreManifestPreview));
+
+        if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
+        {
+            RefreshCommands();
+            return;
+        }
+
+        try
+        {
+            var preview = await _workflow.LoadRestoreManifestPreviewAsync(manifestPath, CancellationToken.None);
+            if (version != _restoreManifestLoadVersion || !string.Equals(manifestPath, RestoreManifestPath, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _restorePreview = preview;
+            SetRestorePreviewLines(preview);
+            SelectedTabIndex = 5;
+            if (updateStatus)
+            {
+                Status = $"Backup manifest loaded. {preview.Actions.Count} restore action(s) ready.";
+            }
+            OnPropertyChanged(nameof(HasRestoreManifestPreview));
+        }
+        catch (Exception ex)
+        {
+            if (version != _restoreManifestLoadVersion)
+            {
+                return;
+            }
+
+            RestoreSummaryLines = [$"Could not load restore manifest: {ex.Message}"];
+            Status = ex.Message;
+            LogLines.Add($"Could not load restore manifest: {ex.Message}");
+        }
+        finally
+        {
+            RefreshCommands();
+        }
+    }
+
+    private void SetRestorePreviewLines(RestoreManifestPreview preview)
+    {
+        var deleteCount = preview.Actions.Count(action => action.Kind == "delete-generated-resource");
+        var copyCount = preview.Actions.Count(action => action.Kind == "copy-backup-file");
+        var moveCount = preview.Actions.Count(action => action.Kind == "move-stream-file");
+        var summaryLines = new List<string>
+        {
+            "Restore summary",
+            $"Manifest: {preview.ManifestPath}",
+            $"Manifest entries: {preview.Entries.Count}",
+            $"Actions: {preview.Actions.Count}",
+            $"Generated resources to remove: {deleteCount}",
+            $"Backup files to copy back: {copyCount}",
+            $"Stream files to move back: {moveCount}",
+        };
+
+        if (preview.SkippedActions.Count > 0)
+        {
+            summaryLines.Add($"Skipped nested/generated entries: {preview.SkippedActions.Count}");
+        }
+
+        var actionLines = new List<string>(preview.Actions.Count + preview.SkippedActions.Count + 1);
+        foreach (var action in preview.Actions)
+        {
+            actionLines.Add(FormatRestoreAction(action));
+        }
+
+        if (preview.SkippedActions.Count > 0)
+        {
+            actionLines.Add("Skipped entries");
+            foreach (var action in preview.SkippedActions)
+            {
+                actionLines.Add($"Skip: {FormatRestoreAction(action)}");
+            }
+        }
+
+        RestoreSummaryLines = summaryLines;
+        RestoreActionLines = actionLines;
+    }
+
+    private void RefreshRestoreText()
+    {
+        RestoreSummaryText = string.Join(Environment.NewLine, RestoreSummaryLines);
+    }
+
+    private static string FormatRestoreAction(RestoreAction action)
+        => action.Kind switch
+        {
+            "delete-generated-resource" => $"Remove generated resource: {action.DestinationPath}",
+            "copy-backup-file" => $"Copy backup: {action.SourcePath} -> {action.DestinationPath}",
+            "move-stream-file" => $"Move stream file: {action.SourcePath} -> {action.DestinationPath}",
+            _ => action.Description,
+        };
 
     private void EnsureDerivedPaths()
     {

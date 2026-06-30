@@ -27,8 +27,11 @@ public sealed class WorkflowRunner : IRepackerWorkflow
     public Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, ApplyOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         => RunWorkflowAsync(service => service.ApplyAsync(plan, backupRoot, options, progress, cancellationToken), cancellationToken);
 
-    public Task RestoreAsync(string backupManifestPath, CancellationToken cancellationToken)
-        => RunWorkflowAsync(service => service.RestoreAsync(backupManifestPath, cancellationToken), cancellationToken);
+    public Task<RestoreManifestPreview> LoadRestoreManifestPreviewAsync(string backupManifestPath, CancellationToken cancellationToken)
+        => RunWorkflowAsync(service => service.LoadRestoreManifestPreviewAsync(backupManifestPath, cancellationToken), cancellationToken);
+
+    public Task RestoreAsync(string backupManifestPath, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
+        => RunWorkflowAsync(service => service.RestoreAsync(backupManifestPath, progress, cancellationToken), cancellationToken);
 
     private Task<TResult> RunWorkflowAsync<TResult>(Func<RepackerService, Task<TResult>> workflow, CancellationToken cancellationToken)
         => Task.Run(() => workflow(_factory.Create()), cancellationToken);
