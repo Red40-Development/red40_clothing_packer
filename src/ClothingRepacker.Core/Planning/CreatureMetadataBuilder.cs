@@ -160,10 +160,33 @@ public sealed class CreatureMetadataBuilder
 
     private static void AddUnique(List<XElement> target, HashSet<string> seen, XElement element)
     {
+        NormalizeValueAttributes(element);
         var key = element.ToString(SaveOptions.DisableFormatting);
         if (seen.Add(key))
         {
             target.Add(element);
+        }
+    }
+
+    private static void NormalizeValueAttributes(XElement element)
+    {
+        foreach (var valueAttribute in element.DescendantsAndSelf().Attributes("value"))
+        {
+            var text = valueAttribute.Value.Trim();
+            if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                && uint.TryParse(text[2..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var hexValue))
+            {
+                valueAttribute.Value = hexValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (uint.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var unsignedValue)
+                     && unsignedValue > int.MaxValue)
+            {
+                valueAttribute.Value = unsignedValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (XmlHelpers.TryParseIntValue(text, out var value))
+            {
+                valueAttribute.Value = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
         }
     }
 

@@ -158,7 +158,29 @@ public sealed record SourceCreatureMetadataSummary(
     string Path,
     int ShaderVariableComponentCount,
     int ComponentExpressionCount,
-    int PropExpressionCount);
+    int PropExpressionCount,
+    List<string> SourceYmts);
+
+public sealed record CreatureMetadataSourceBinding(
+    string SourceYmtPath,
+    string SourceMetadataPath);
+
+public sealed record CreatureMetadataOutputPlan(
+    string Name,
+    string OutputYmtPath,
+    List<string> TargetCollections,
+    List<CreatureMetadataSourceBinding> SourceBindings);
+
+public sealed record SourceAlternateMetadataSummary(
+    string Resource,
+    string Path,
+    string Kind,
+    int ItemCount);
+
+public sealed record AlternateMetadataOutputPlan(
+    string Kind,
+    string OutputPath,
+    List<string> SourcePaths);
 
 public sealed record TargetCollectionPlan(
     string CollectionName,
@@ -202,6 +224,9 @@ public sealed class MergePlan
     public List<string> Warnings { get; init; } = [];
     public List<string> Errors { get; init; } = [];
     public List<SourceCreatureMetadataSummary> SourceCreatureMetadata { get; init; } = [];
+    public List<CreatureMetadataOutputPlan> CreatureMetadataOutputs { get; init; } = [];
+    public List<SourceAlternateMetadataSummary> SourceAlternateMetadata { get; init; } = [];
+    public List<AlternateMetadataOutputPlan> AlternateMetadataOutputs { get; init; } = [];
 }
 
 public sealed class MergePlanSettings

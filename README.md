@@ -127,7 +127,9 @@ The two optional `build` toggles both default to `true`:
 - `--include-ymt-xml false` skips writing the preview `stream/*.ymt.xml` files
 - `--include-debug-client false` skips generating `client/validate_collections.lua` and removes its `client_script` line from `fxmanifest.lua`
 
-Creature metadata is preserved and remapped when it has a matching source `ShopPedApparel` `creatureMetaData` reference. Creature metadata without a matching shop metadata reference is treated as broken, warned about during analyze, skipped during build, and only moved into the backup during apply.
+Creature metadata is preserved and remapped when it has a matching source `ShopPedApparel` `creatureMetaData` reference. When multiple source shop metadata files share one creature metadata file, the generated shop metadata keeps that relationship and points to one shared generated creature metadata YMT. Creature metadata without a matching shop metadata reference is treated as broken, warned about during analyze, skipped during build, and only moved into the backup during apply.
+
+`pedalternatevariations.meta` and `first_person_alternates.meta` files are detected, remapped to generated collection names and drawable indexes, written to the generated resource `data` folder, and declared in the generated manifest with their FiveM data file types.
 
 Apply the plan to your actual resource set:
 
