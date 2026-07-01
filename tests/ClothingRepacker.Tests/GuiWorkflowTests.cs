@@ -16,11 +16,15 @@ public class GuiWorkflowTests
 
         vm.SelectResourcesFolder(root);
 
+        var parent = Directory.GetParent(root)!.FullName;
+        var outputRoot = Path.Combine(parent, "red40_output");
+
         Assert.Equal(root, vm.ResourcesPath);
         Assert.Equal([root], vm.ResourcePaths.ToArray());
-        Assert.Equal(Directory.GetParent(root)!.FullName, vm.GeneratedResourcesRoot);
-        Assert.Equal(Path.Combine(Directory.GetParent(root)!.FullName, "backups"), vm.BackupRoot);
-        Assert.Equal(Path.Combine(Directory.GetParent(root)!.FullName, "plan.json"), vm.PlanPath);
+        Assert.Equal(outputRoot, vm.OutputPath);
+        Assert.Equal(outputRoot, vm.GeneratedResourcesRoot);
+        Assert.Equal(Path.Combine(parent, "backups"), vm.BackupRoot);
+        Assert.Equal(Path.Combine(parent, "plan.json"), vm.PlanPath);
     }
 
     [Fact]
@@ -33,11 +37,12 @@ public class GuiWorkflowTests
         };
         var vm = CreateViewModel(workflow);
         vm.SelectResourcesFolder(root);
+        var outputRoot = Path.Combine(Directory.GetParent(root)!.FullName, "red40_output");
 
         await vm.AnalyzeAsync();
 
         Assert.Equal([root], workflow.AnalyzeResourceFolders);
-        Assert.Equal(Directory.GetParent(root)!.FullName, workflow.AnalyzeGeneratedResourcesRoot);
+        Assert.Equal(outputRoot, workflow.AnalyzeGeneratedResourcesRoot);
         Assert.False(workflow.AnalyzeSettings.RenameStreamsInPlace);
         Assert.Equal(1, vm.SelectedTabIndex);
         Assert.Equal(2, vm.Summary.SourceYmtCount);
@@ -110,6 +115,34 @@ public class GuiWorkflowTests
         Assert.True(workflow.ApplyOptions.CopyResourcesToOutputBeforeRename);
         Assert.False(workflow.ApplyOptions.IncludeYmtXml);
         Assert.False(workflow.ApplyOptions.IncludeDebugClient);
+    }
+
+    [Fact]
+    public async Task SingleResourceCopyModeApplyCopiesResourceFolderInsideOutputRoot()
+    {
+        var root = CreateTempDirectory("gui-single-resource-copy-apply");
+        var resourceRoot = Path.Combine(root, "gang_flags");
+        var outputRoot = Path.Combine(root, "output");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+        Directory.CreateDirectory(outputRoot);
+        await File.WriteAllTextAsync(
+            Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd"),
+            "drawable");
+
+        var vm = new MainWindowViewModel(new WorkflowRunner(new RepackerServiceFactory()), new FakeSettingsStore());
+        vm.AddResourceFolders([resourceRoot]);
+        vm.OutputPath = outputRoot;
+        vm.BackupRoot = Path.Combine(root, "backups");
+
+        await vm.AnalyzeAsync();
+        await vm.BuildPreviewAsync();
+        await vm.ApplyAsync();
+
+        Assert.Empty(vm.Errors);
+        Assert.True(File.Exists(Path.Combine(resourceRoot, "fxmanifest.lua")));
+        Assert.True(File.Exists(Path.Combine(outputRoot, "gang_flags", "fxmanifest.lua")));
+        Assert.True(Directory.Exists(Path.Combine(outputRoot, "zz_merged_clothing_meta")));
+        Assert.False(File.Exists(Path.Combine(outputRoot, "fxmanifest.lua")));
     }
 
     [Fact]

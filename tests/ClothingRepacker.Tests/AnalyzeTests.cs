@@ -166,6 +166,58 @@ public class AnalyzeTests
     }
 
     [Fact]
+    public async Task AnalyzeExplicitResourceFoldersRejectsOutputInsideSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-nested-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync([selected], Path.Combine(selected, "output"), "zz_merged_clothing_meta", new MergePlanSettings()));
+
+        Assert.Contains("outside selected resource folders", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersRejectsCopyModeOutputThatWouldOverwriteSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-copy-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync([selected], resources, "zz_merged_clothing_meta", new MergePlanSettings
+            {
+                RenameStreamsInPlace = false,
+            }));
+
+        Assert.Contains("output root separate", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildRejectsOutputInsideSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"build-nested-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([selected], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.BuildAsync(analyze.Plan, Path.Combine(selected, "preview")));
+
+        Assert.Contains("outside selected resource folders", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AnalyzeExplicitResourceFoldersMergesMultipleSelectedResources()
     {
         var root = Path.Combine(Path.GetTempPath(), $"explicit-multi-resource-test-{Guid.NewGuid():N}");

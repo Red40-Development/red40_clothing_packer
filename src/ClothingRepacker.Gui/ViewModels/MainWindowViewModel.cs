@@ -9,6 +9,8 @@ namespace ClothingRepacker.Gui.ViewModels;
 
 public sealed class MainWindowViewModel : ViewModelBase
 {
+    private const string DefaultCopyOutputFolderName = "red40_output";
+
     private readonly IRepackerWorkflow _workflow;
     private readonly IProjectStore _projectStore;
     private readonly IUpdateChecker? _updateChecker;
@@ -994,9 +996,12 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         var firstResourcePath = ResourcePaths[0];
         var parent = Directory.GetParent(firstResourcePath)?.FullName ?? firstResourcePath;
+        var defaultOutputRoot = CopyResourcesToOutputBeforeRename
+            ? Path.Combine(parent, DefaultCopyOutputFolderName)
+            : parent;
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
-            OutputPath = parent;
+            OutputPath = defaultOutputRoot;
         }
         else
         {

@@ -83,6 +83,13 @@ public sealed class RepackerService
             throw new InvalidOperationException("Drawable limits must be greater than zero.");
         }
 
+        ValidateGeneratedResourcesRoot(
+            scanItems.Select(item => item.ResourceRoot),
+            generatedResourcesRoot,
+            settings.RenameStreamsInPlace
+                ? GeneratedResourcesRootUsage.GeneratedOnly
+                : GeneratedResourcesRootUsage.CopySourceResources);
+
         var sources = new List<SourceYmt>();
         var creatureMetadata = new List<SourceCreatureMetadata>();
         var brokenCreatureMetadata = new List<SourceCreatureMetadata>();
@@ -337,6 +344,9 @@ public sealed class RepackerService
     public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions? options = null, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         options ??= new BuildOptions();
+        var fullOutputRoot = Path.GetFullPath(outputRoot);
+        ValidateGeneratedResourcesRoot(GetKnownResourceRoots(plan), fullOutputRoot, GeneratedResourcesRootUsage.GeneratedOnly);
+
         var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
         var creatureMetadataByPath = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
         var alternateMetadataByPath = await ReloadAlternateMetadataForPlanAsync(plan, cancellationToken);
@@ -345,7 +355,6 @@ public sealed class RepackerService
             .SelectMany(output => output.TargetCollections.Select(collection => new { collection, output }))
             .ToDictionary(item => item.collection, item => item.output, StringComparer.OrdinalIgnoreCase);
         var writtenFiles = new List<string>();
-        var fullOutputRoot = Path.GetFullPath(outputRoot);
         Directory.CreateDirectory(fullOutputRoot);
 
         progress?.Report(new OperationProgress(
@@ -568,6 +577,13 @@ public sealed class RepackerService
         var resourceRootsToCopy = options.CopyResourcesToOutputBeforeRename
             ? GetResourceRootsForCopy(plan)
             : [];
+        var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
+        ValidateGeneratedResourcesRoot(
+            GetKnownResourceRoots(plan),
+            generatedResourcesRoot,
+            options.CopyResourcesToOutputBeforeRename
+                ? GeneratedResourcesRootUsage.CopySourceResources
+                : GeneratedResourcesRootUsage.GeneratedOnly);
 
         progress?.Report(new OperationProgress(
             "apply",
@@ -598,7 +614,6 @@ public sealed class RepackerService
             IncludeDebugClient = options.IncludeDebugClient,
         }, progress, cancellationToken);
         var entries = new List<BackupEntry>();
-        var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
         var pathMap = options.CopyResourcesToOutputBeforeRename
             ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken)
             : new ResourcePathMap([]);
@@ -762,8 +777,8 @@ public sealed class RepackerService
         for (var index = 0; index < resourceRoots.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var sourceRoot = Path.GetFullPath(resourceRoots[index]);
-            var destinationRoot = Path.Combine(generatedResourcesRoot, Path.GetFileName(sourceRoot));
+            var sourceRoot = NormalizePath(resourceRoots[index]);
+            var destinationRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
             ValidateResourceCopyDestination(sourceRoot, destinationRoot);
 
             progress?.Report(new OperationProgress(
@@ -772,7 +787,7 @@ public sealed class RepackerService
                 index,
                 resourceRoots.Count,
                 sourceRoot,
-                $"Copying source resource {index + 1}/{resourceRoots.Count}: {Path.GetFileName(sourceRoot)}."));
+                $"Copying source resource {index + 1}/{resourceRoots.Count}: {Path.GetFileName(NormalizePath(sourceRoot))}."));
 
             if (Directory.Exists(destinationRoot))
             {
@@ -797,6 +812,17 @@ public sealed class RepackerService
 
     private static IReadOnlyList<string> GetResourceRootsForCopy(MergePlan plan)
     {
+        var roots = GetKnownResourceRoots(plan);
+        if (roots.Count > 0)
+        {
+            return roots;
+        }
+
+        throw new InvalidOperationException("Copy-to-output apply mode requires resource roots in the plan. Re-run analyze with the current version and try again.");
+    }
+
+    private static IReadOnlyList<string> GetKnownResourceRoots(MergePlan plan)
+    {
         var roots = plan.ResourceRoots
             .Where(root => !string.IsNullOrWhiteSpace(root))
             .Select(Path.GetFullPath)
@@ -813,10 +839,6 @@ public sealed class RepackerService
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (roots.Count == 0)
-        {
-            throw new InvalidOperationException("Copy-to-output apply mode requires resource roots in the plan. Re-run analyze with the current version and try again.");
-        }
 
         return roots;
     }
@@ -849,6 +871,49 @@ public sealed class RepackerService
             throw new InvalidOperationException($"Copy-to-output apply mode cannot copy a resource inside itself: {destinationRoot}");
         }
     }
+
+    private static void ValidateGeneratedResourcesRoot(
+        IEnumerable<string> resourceRoots,
+        string generatedResourcesRoot,
+        GeneratedResourcesRootUsage usage)
+    {
+        var fullGeneratedResourcesRoot = Path.GetFullPath(generatedResourcesRoot);
+        if (IsResourceFolder(fullGeneratedResourcesRoot))
+        {
+            throw new InvalidOperationException($"Output root must be a folder that contains resources, not a resource folder: {fullGeneratedResourcesRoot}");
+        }
+
+        var roots = resourceRoots
+            .Where(root => !string.IsNullOrWhiteSpace(root))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var sourceRoot in roots)
+        {
+            if (IsPathAtOrInside(fullGeneratedResourcesRoot, sourceRoot))
+            {
+                throw new InvalidOperationException($"Output root must be outside selected resource folders. Choose a folder that will contain generated resources, not a source resource: {fullGeneratedResourcesRoot}");
+            }
+        }
+
+        if (usage != GeneratedResourcesRootUsage.CopySourceResources)
+        {
+            return;
+        }
+
+        foreach (var sourceRoot in roots)
+        {
+            ValidateResourceCopyDestination(sourceRoot, GetResourceCopyDestination(sourceRoot, fullGeneratedResourcesRoot));
+        }
+    }
+
+    private static string GetResourceCopyDestination(string sourceRoot, string generatedResourcesRoot)
+        => Path.Combine(Path.GetFullPath(generatedResourcesRoot), Path.GetFileName(NormalizePath(sourceRoot)));
+
+    private static bool IsResourceFolder(string path)
+        => File.Exists(Path.Combine(path, "fxmanifest.lua"))
+           || File.Exists(Path.Combine(path, "__resource.lua"));
 
     private static bool PathsEqual(string left, string right)
         => NormalizePath(left).Equals(NormalizePath(right), StringComparison.OrdinalIgnoreCase);
@@ -1931,21 +1996,23 @@ end, false)
         string stage = "copy-file",
         CancellationToken cancellationToken = default)
     {
-        Directory.CreateDirectory(destination);
-        foreach (var directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+        var fullSource = NormalizePath(source);
+        var fullDestination = NormalizePath(destination);
+        Directory.CreateDirectory(fullDestination);
+        foreach (var directory in Directory.GetDirectories(fullSource, "*", SearchOption.AllDirectories))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Directory.CreateDirectory(directory.Replace(source, destination, StringComparison.OrdinalIgnoreCase));
+            Directory.CreateDirectory(Path.Combine(fullDestination, Path.GetRelativePath(fullSource, directory)));
         }
 
-        var files = Directory.GetFiles(source, "*", SearchOption.AllDirectories)
+        var files = Directory.GetFiles(fullSource, "*", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
         for (var index = 0; index < files.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var file = files[index];
-            var destinationFile = file.Replace(source, destination, StringComparison.OrdinalIgnoreCase);
+            var destinationFile = Path.Combine(fullDestination, Path.GetRelativePath(fullSource, file));
             File.Copy(file, destinationFile, overwrite: true);
             progress?.Report(new OperationProgress(
                 operation,
@@ -1957,6 +2024,12 @@ end, false)
     }
 
     private sealed record ResourceRootMapping(string SourceRoot, string DestinationRoot);
+
+    private enum GeneratedResourcesRootUsage
+    {
+        GeneratedOnly,
+        CopySourceResources,
+    }
 
     private sealed class ResourcePathMap
     {
