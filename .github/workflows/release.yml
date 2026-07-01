@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.2.3"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark release as prerelease"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    env:
+      CLI_PROJECT: src/ClothingRepacker.Cli/ClothingRepacker.Cli.csproj
+      GUI_PROJECT: src/ClothingRepacker.Gui/ClothingRepacker.Gui.csproj
+      PUBLISH_ROOT: artifacts/publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Validate version
+        shell: bash
+        run: |
+          VERSION="${{ inputs.version }}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "Invalid version: $VERSION"
+            echo "Use a SemVer-like version such as 1.2.3 or 1.2.3-beta.1"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=v$VERSION" >> "$GITHUB_ENV"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Publish CLI Linux x64
+        run: >
+          dotnet publish "$CLI_PROJECT"
+          -p:PublishProfile=LinuxX64
+          -p:Version="$VERSION"
+          -p:AssemblyVersion="$VERSION"
+          -p:FileVersion="$VERSION"
+
+      - name: Publish CLI Windows x64
+        run: >
+          dotnet publish "$CLI_PROJECT"
+          -p:PublishProfile=WinX64
+          -p:Version="$VERSION"
+          -p:AssemblyVersion="$VERSION"
+          -p:FileVersion="$VERSION"
+
+      - name: Publish GUI Linux x64
+        run: >
+          dotnet publish "$GUI_PROJECT"
+          -p:PublishProfile=LinuxX64
+          -p:Version="$VERSION"
+          -p:AssemblyVersion="$VERSION"
+          -p:FileVersion="$VERSION"
+
+      - name: Publish GUI Windows x64
+        run: >
+          dotnet publish "$GUI_PROJECT"
+          -p:PublishProfile=WinX64
+          -p:Version="$VERSION"
+          -p:AssemblyVersion="$VERSION"
+          -p:FileVersion="$VERSION"
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          mkdir -p artifacts/release
+
+          cp "$PUBLISH_ROOT/cli/linux-x64/ClothingRepacker.Cli" \
+            "artifacts/release/ClothingRepacker.Cli-linux-x64-v$VERSION"
+
+          cp "$PUBLISH_ROOT/cli/win-x64/ClothingRepacker.Cli.exe" \
+            "artifacts/release/ClothingRepacker.Cli-win-x64-v$VERSION.exe"
+
+          cp "$PUBLISH_ROOT/gui/linux-x64/ClothingRepacker.Gui" \
+            "artifacts/release/ClothingRepacker.Gui-linux-x64-v$VERSION"
+
+          cp "$PUBLISH_ROOT/gui/win-x64/ClothingRepacker.Gui.exe" \
+            "artifacts/release/ClothingRepacker.Gui-win-x64-v$VERSION.exe"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-artifacts-v${{ inputs.version }}
+          path: artifacts/release/*
+
+      - name: Create GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "${{ inputs.prerelease }}" == "true" ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          cat > release-notes.md <<EOF
+          ## ClothingRepacker $VERSION
+
+          ### Downloads
+
+          | File | Platform | App |
+          |---|---|---|
+          | ClothingRepacker-CLI-linux-x64-v$VERSION | Linux x64 | CLI |
+          | ClothingRepacker-CLI-windows-x64-v$VERSION.exe | Windows x64 | CLI |
+          | ClothingRepacker-GUI-linux-x64-v$VERSION | Linux x64 | GUI |
+          | ClothingRepacker-GUI-windows-x64-v$VERSION.exe | Windows x64 | GUI |
+          EOF
+
+          gh release create "$TAG" \
+            "artifacts/release/ClothingRepacker-CLI-linux-x64-v$VERSION#CLI - Linux x64" \
+            "artifacts/release/ClothingRepacker-CLI-windows-x64-v$VERSION.exe#CLI - Windows x64" \
+            "artifacts/release/ClothingRepacker-GUI-linux-x64-v$VERSION#GUI - Linux x64" \
+            "artifacts/release/ClothingRepacker-GUI-windows-x64-v$VERSION.exe#GUI - Windows x64" \
+            --title "ClothingRepacker $VERSION" \
+            --notes-file release-notes.md \
+            $PRERELEASE_FLAG

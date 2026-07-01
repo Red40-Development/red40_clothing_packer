@@ -1,5 +1,4 @@
 using ClothingRepacker.Core.Models;
-using System.Globalization;
 using System.Xml.Linq;
 using static ClothingRepacker.Core.Xml.XmlHelpers;
 
@@ -35,12 +34,12 @@ public sealed class CreatureMetadataReader
     }
 
     private static int GetValue(XElement item, string name)
-        => int.Parse(RequiredAttribute(RequiredElement(item, name), "value").Value, CultureInfo.InvariantCulture);
+        => ValueAttr(RequiredElement(item, name));
 
     private static bool TryGetValue(XElement item, string name, out int value)
     {
         value = 0;
         var attribute = item.Element(name)?.Attribute("value");
-        return attribute is not null && int.TryParse(attribute.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+        return attribute is not null && XmlHelpers.TryParseIntValue(attribute.Value, out value);
     }
 }

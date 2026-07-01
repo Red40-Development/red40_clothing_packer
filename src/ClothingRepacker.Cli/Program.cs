@@ -8,7 +8,7 @@ using System.Reflection;
 var exitCode = await ProgramEntry.RunAsync(args);
 return exitCode;
 
-internal static class ProgramEntry
+public static class ProgramEntry
 {
     public static async Task<int> RunAsync(string[] args)
     {
@@ -26,7 +26,7 @@ internal static class ProgramEntry
         var options = ParseOptions(normalizedArgs.Skip(1).ToArray());
         if (skipVersionCheck)
         {
-            options["--no-version-check"] = null;
+            options.Add("--no-version-check", null);
         }
 
         await CheckForUpdatesAsync(options);
@@ -61,10 +61,9 @@ internal static class ProgramEntry
         }
     }
 
-    private static async Task<int> RunAnalyzeAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunAnalyzeAsync(RepackerService service, CliOptions options)
     {
         using var progressWriter = new ConsoleProgressWriter();
-        var resources = Required(options, "--resources");
         var targetResource = options.GetValueOrDefault("--target-resource") ?? "zz_merged_clothing_meta";
         var targetPrefix = options.GetValueOrDefault("--target-prefix") ?? "merged";
         var outPath = Required(options, "--out");
@@ -83,7 +82,7 @@ internal static class ProgramEntry
             ShopMetaMode = options.GetValueOrDefault("--shop-meta-mode") ?? "complete",
         };
 
-        var result = await service.AnalyzeAsync(resources, targetResource, settings, CreateConsoleProgress(progressWriter));
+        var result = await AnalyzeWithOptionsAsync(service, options, targetResource, settings, CreateConsoleProgress(progressWriter));
         progressWriter.CompleteLine();
         await service.SavePlanAsync(result.Plan, outPath);
         Console.WriteLine($"Analyzed {result.Plan.SourceYmts.Count} YMTs into {result.Plan.TargetCollections.Count} target collections.");
@@ -107,7 +106,7 @@ internal static class ProgramEntry
         return 0;
     }
 
-    private static async Task<int> RunBuildAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunBuildAsync(RepackerService service, CliOptions options)
     {
         using var progressWriter = new ConsoleProgressWriter();
         var plan = await service.LoadPlanAsync(Required(options, "--plan"));
@@ -122,24 +121,30 @@ internal static class ProgramEntry
         return 0;
     }
 
-    private static async Task<int> RunApplyAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunApplyAsync(RepackerService service, CliOptions options)
     {
         using var progressWriter = new ConsoleProgressWriter();
         var plan = await service.LoadPlanAsync(Required(options, "--plan"));
-        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"), CreateConsoleProgress(progressWriter));
+        var applyOptions = new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = options.ContainsKey("--copy-resources-to-output") || !plan.Settings.RenameStreamsInPlace,
+            IncludeYmtXml = ParseBool(options.GetValueOrDefault("--include-ymt-xml"), fallback: true),
+            IncludeDebugClient = ParseBool(options.GetValueOrDefault("--include-debug-client"), fallback: true),
+        };
+        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"), applyOptions, CreateConsoleProgress(progressWriter));
         progressWriter.CompleteLine();
         Console.WriteLine($"Applied plan with {entries.Count} backup entries.");
         return 0;
     }
 
-    private static async Task<int> RunRestoreAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunRestoreAsync(RepackerService service, CliOptions options)
     {
         await service.RestoreAsync(Required(options, "--backup-manifest"));
         Console.WriteLine("Restore complete.");
         return 0;
     }
 
-    private static async Task<int> RunValidateAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunValidateAsync(RepackerService service, CliOptions options)
     {
         if (options.TryGetValue("--plan", out var planPath) && !string.IsNullOrWhiteSpace(planPath))
         {
@@ -154,10 +159,10 @@ internal static class ProgramEntry
             return errors.Count == 0 ? 0 : 1;
         }
 
-        if (options.TryGetValue("--resources", out var resources) && !string.IsNullOrWhiteSpace(resources))
+        if (options.ContainsKey("--resources") || options.GetValues("--resource").Count > 0)
         {
             using var progressWriter = new ConsoleProgressWriter();
-            var result = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings(), CreateConsoleProgress(progressWriter));
+            var result = await AnalyzeWithOptionsAsync(service, options, "zz_merged_clothing_meta", new MergePlanSettings(), CreateConsoleProgress(progressWriter));
             progressWriter.CompleteLine();
             foreach (var error in result.Plan.Errors)
             {
@@ -168,10 +173,10 @@ internal static class ProgramEntry
             return result.Plan.Errors.Count == 0 ? 0 : 1;
         }
 
-        throw new InvalidOperationException("validate requires --plan or --resources.");
+        throw new InvalidOperationException("validate requires --plan, --resources, or at least one --resource.");
     }
 
-    private static async Task<int> RunExportXmlAsync(RepackerService service, Dictionary<string, string?> options)
+    private static async Task<int> RunExportXmlAsync(RepackerService service, CliOptions options)
     {
         using var progressWriter = new ConsoleProgressWriter();
         var folder = Required(options, "--folder");
@@ -186,25 +191,61 @@ internal static class ProgramEntry
         return 0;
     }
 
+    private static Task<AnalyzeResult> AnalyzeWithOptionsAsync(RepackerService service, CliOptions options, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress)
+    {
+        var resources = options.GetValueOrDefault("--resources");
+        var resourceFolders = options.GetValues("--resource");
+        if (!string.IsNullOrWhiteSpace(resources) && resourceFolders.Count > 0)
+        {
+            throw new InvalidOperationException("Use either --resources <parent> or repeated --resource <folder>, not both.");
+        }
+
+        if (resourceFolders.Count > 0)
+        {
+            var generatedRoot = options.GetValueOrDefault("--generated-root");
+            if (string.IsNullOrWhiteSpace(generatedRoot))
+            {
+                throw new InvalidOperationException("--generated-root is required when using --resource.");
+            }
+
+            return service.AnalyzeAsync(resourceFolders, generatedRoot, targetResource, settings, progress);
+        }
+
+        if (!string.IsNullOrWhiteSpace(resources))
+        {
+            return service.AnalyzeAsync(resources, targetResource, settings, progress);
+        }
+
+        throw new InvalidOperationException("Missing required option --resources or --resource.");
+    }
+
     private static void PrintHelp()
     {
         Console.WriteLine("""
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
+clothing-repacker analyze --resource <path> [--resource <path> ...] --generated-root <folder> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
 clothing-repacker build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
-clothing-repacker apply --plan <plan.json> --backup-root <folder>
+clothing-repacker apply --plan <plan.json> --backup-root <folder> [--copy-resources-to-output]
+  [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>
+clothing-repacker validate --resource <path> [--resource <path> ...] --generated-root <folder>
 clothing-repacker export-xml --folder <path> [--overwrite]
 
 Global options:
   --no-version-check   Skip the GitHub update check.
+
+Apply options:
+  --copy-resources-to-output
+                       Copy source resources into the plan's generated/output root
+                       and rename the copies instead of modifying originals.
 """);
     }
 
-    private static async Task CheckForUpdatesAsync(Dictionary<string, string?> options)
+    private static async Task CheckForUpdatesAsync(CliOptions options)
     {
         if (options.ContainsKey("--no-version-check") ||
             string.Equals(Environment.GetEnvironmentVariable("RED40_NO_VERSION_CHECK"), "1", StringComparison.Ordinal))
@@ -232,9 +273,9 @@ Global options:
         }
     }
 
-    private static Dictionary<string, string?> ParseOptions(string[] args)
+    public static CliOptions ParseOptions(string[] args)
     {
-        var options = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var options = new CliOptions();
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
@@ -245,19 +286,19 @@ Global options:
 
             if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
             {
-                options[arg] = args[i + 1];
+                options.Add(arg, args[i + 1]);
                 i++;
             }
             else
             {
-                options[arg] = null;
+                options.Add(arg, null);
             }
         }
 
         return options;
     }
 
-    private static string Required(Dictionary<string, string?> options, string name)
+    private static string Required(CliOptions options, string name)
         => options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : throw new InvalidOperationException($"Missing required option {name}.");
@@ -290,6 +331,7 @@ Global options:
             "write-target" => $"{prefix}{progressBar} target collections built | files written {progress.WrittenFileCount}{path}",
             "export-file" => $"{prefix}{progressBar} files | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
             "build-staging" => $"{prefix} {progress.Message}",
+            "copy-source-resource" => $"{prefix}{progressBar} source resources copied{path}",
             "rename-stream" => $"{prefix}{progressBar} stream files renamed | backups {progress.BackupCount}{path}",
             "backup-source-ymt" => $"{prefix}{progressBar} source YMTs backed up | renames {progress.RenameCount} | backups {progress.BackupCount}{path}",
             "copy-generated-resource" => $"{prefix} {progress.Message} | generated files {progress.WrittenFileCount}",
@@ -373,4 +415,43 @@ internal sealed class ConsoleProgressWriter : IDisposable
 
     public void Dispose()
         => CompleteLine();
+}
+
+public sealed class CliOptions
+{
+    private readonly Dictionary<string, List<string?>> _values = new(StringComparer.OrdinalIgnoreCase);
+
+    public void Add(string name, string? value)
+    {
+        if (!_values.TryGetValue(name, out var values))
+        {
+            values = [];
+            _values[name] = values;
+        }
+
+        values.Add(value);
+    }
+
+    public bool ContainsKey(string name)
+        => _values.ContainsKey(name);
+
+    public bool TryGetValue(string name, out string? value)
+    {
+        if (_values.TryGetValue(name, out var values) && values.Count > 0)
+        {
+            value = values[^1];
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
+
+    public string? GetValueOrDefault(string name)
+        => TryGetValue(name, out var value) ? value : null;
+
+    public IReadOnlyList<string> GetValues(string name)
+        => _values.TryGetValue(name, out var values)
+            ? values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!).ToList()
+            : [];
 }

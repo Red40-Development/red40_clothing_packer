@@ -103,6 +103,19 @@ public sealed record BackupEntry(
     string? Sha256After,
     DateTimeOffset CreatedAtUtc);
 
+public sealed record RestoreManifestPreview(
+    string ManifestPath,
+    IReadOnlyList<BackupEntry> Entries,
+    IReadOnlyList<RestoreAction> Actions,
+    IReadOnlyList<RestoreAction> SkippedActions);
+
+public sealed record RestoreAction(
+    string Kind,
+    string Description,
+    string? SourcePath,
+    string? DestinationPath,
+    BackupEntry Entry);
+
 public sealed record OldYmtBackupPlan(
     string SourcePath,
     string BackupPath);
@@ -145,7 +158,29 @@ public sealed record SourceCreatureMetadataSummary(
     string Path,
     int ShaderVariableComponentCount,
     int ComponentExpressionCount,
-    int PropExpressionCount);
+    int PropExpressionCount,
+    List<string> SourceYmts);
+
+public sealed record CreatureMetadataSourceBinding(
+    string SourceYmtPath,
+    string SourceMetadataPath);
+
+public sealed record CreatureMetadataOutputPlan(
+    string Name,
+    string OutputYmtPath,
+    List<string> TargetCollections,
+    List<CreatureMetadataSourceBinding> SourceBindings);
+
+public sealed record SourceAlternateMetadataSummary(
+    string Resource,
+    string Path,
+    string Kind,
+    int ItemCount);
+
+public sealed record AlternateMetadataOutputPlan(
+    string Kind,
+    string OutputPath,
+    List<string> SourcePaths);
 
 public sealed record TargetCollectionPlan(
     string CollectionName,
@@ -172,6 +207,8 @@ public sealed class MergePlan
     public int SchemaVersion { get; init; } = 1;
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public string ResourcesRoot { get; init; } = string.Empty;
+    public List<string> ResourceRoots { get; init; } = [];
+    public string GeneratedResourcesRoot { get; init; } = string.Empty;
     public string TargetResource { get; init; } = "zz_merged_clothing_meta";
     public MergePlanSettings Settings { get; init; } = new();
     public List<SourceYmtSummary> SourceYmts { get; init; } = [];
@@ -187,6 +224,9 @@ public sealed class MergePlan
     public List<string> Warnings { get; init; } = [];
     public List<string> Errors { get; init; } = [];
     public List<SourceCreatureMetadataSummary> SourceCreatureMetadata { get; init; } = [];
+    public List<CreatureMetadataOutputPlan> CreatureMetadataOutputs { get; init; } = [];
+    public List<SourceAlternateMetadataSummary> SourceAlternateMetadata { get; init; } = [];
+    public List<AlternateMetadataOutputPlan> AlternateMetadataOutputs { get; init; } = [];
 }
 
 public sealed class MergePlanSettings
@@ -220,13 +260,20 @@ public sealed record AnalyzeResult(
 
 public sealed record BuildOptions
 {
-    public bool IncludeYmtXml { get; init; } = true;
-    public bool IncludeDebugClient { get; init; } = true;
+    public bool IncludeYmtXml { get; init; } = false;
+    public bool IncludeDebugClient { get; init; } = false;
 }
 
 public sealed record BuildResult(
     string OutputRoot,
     IReadOnlyList<string> WrittenFiles);
+
+public sealed record ApplyOptions
+{
+    public bool CopyResourcesToOutputBeforeRename { get; init; }
+    public bool IncludeYmtXml { get; init; } = false;
+    public bool IncludeDebugClient { get; init; } = false;
+}
 
 public sealed record ExportXmlResult(
     string RootFolder,

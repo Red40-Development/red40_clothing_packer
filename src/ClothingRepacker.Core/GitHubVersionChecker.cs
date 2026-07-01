@@ -2,7 +2,9 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-internal sealed class GitHubVersionChecker
+namespace ClothingRepacker.Core;
+
+public sealed class GitHubVersionChecker
 {
     private readonly HttpClient _httpClient;
     private readonly string _owner;
@@ -48,12 +50,12 @@ internal sealed class GitHubVersionChecker
     }
 }
 
-internal sealed record VersionCheckResult(AppVersion CurrentVersion, AppVersion LatestVersion, string ReleaseUrl)
+public sealed record VersionCheckResult(AppVersion CurrentVersion, AppVersion LatestVersion, string ReleaseUrl)
 {
     public bool IsUpdateAvailable => LatestVersion.CompareTo(CurrentVersion) > 0;
 }
 
-internal readonly partial record struct AppVersion(int Major, int Minor, int Patch, string Display) : IComparable<AppVersion>
+public readonly partial record struct AppVersion(int Major, int Minor, int Patch, string Display) : IComparable<AppVersion>
 {
     public static AppVersion FromInformationalVersion(string? value)
         => TryParse(value, out var version) ? version : new AppVersion(0, 0, 0, "0.0.0");

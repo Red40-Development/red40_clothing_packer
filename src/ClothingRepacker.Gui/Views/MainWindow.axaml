@@ -1,0 +1,262 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ClothingRepacker.Gui.Views.MainWindow"
+        Title="Red40 Clothing Repacker"
+        Width="1280"
+        Height="960"
+        MinWidth="980"
+        MinHeight="640"
+        DragDrop.AllowDrop="True">
+  <Grid RowDefinitions="Auto,*" Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+    <Border Grid.Row="0" Padding="16,14" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
+        <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Classes="section-title"
+                       Text="Red40 Clothing Repacker"
+                       Margin="0"
+                       VerticalAlignment="Center" />
+            <TextBlock Text="{Binding VersionCheckText}"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+            <Button Click="UpdateAvailable_Click"
+                    IsVisible="{Binding IsUpdateAvailable}"
+                    MinHeight="0"
+                    Padding="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    ToolTip.Tip="{Binding UpdateReleaseUrl}">
+              <TextBlock Text="Update Available"
+                         TextDecorations="Underline"
+                         Foreground="#2B6CB0" />
+            </Button>
+          </StackPanel>
+          <TextBlock Text="{Binding ProjectDisplayName}"
+                     Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+          <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <StackPanel Spacing="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+              <TextBlock Text="Like this software?"
+                         FontSize="12"
+                         HorizontalAlignment="Right"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+              <Button Click="TeamSupport_Click"
+                      MinHeight="0"
+                      Padding="0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      ToolTip.Tip="Support our team"
+                      HorizontalAlignment="Right">
+                <TextBlock Text="Support our team"
+                           FontSize="12"
+                           TextDecorations="Underline"
+                           Foreground="#2B6CB0" />
+              </Button>
+            </StackPanel>
+            <Button Click="StoreLogo_Click"
+                    MinHeight="0"
+                    Padding="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    ToolTip.Tip="Open Red40 Store"
+                    HorizontalAlignment="Right">
+              <Image Source="avares://ClothingRepacker.Gui/Assets/red40_logo.png"
+                     Height="72"
+                     Stretch="UniformToFill"
+                     HorizontalAlignment="Right" />
+            </Button>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="Help" Command="{Binding HelpCommand}" />
+            <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
+            <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
+            <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
+            <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="0" Grid.Row="2" Orientation="Horizontal" Spacing="8">
+          <Button Content="Open Project..." Click="OpenProject_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="Save Project" Click="SaveProject_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="Save Project As..." Click="SaveProjectAs_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="Clear Project" Click="ClearProject_Click" IsEnabled="{Binding CanEditProject}" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="340,*" ColumnSpacing="12" Margin="12">
+      <ScrollViewer Grid.Column="0">
+        <StackPanel Spacing="12">
+          <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="section-title" Text="Options" />
+              <TextBlock Text="New Merged Resource Name" />
+              <TextBox Text="{Binding TargetResource, Mode=TwoWay}" />
+              <TextBlock Text="Target prefix" />
+              <TextBox Text="{Binding TargetPrefix, Mode=TwoWay}" />
+              <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+              </Grid>
+              <CheckBox Content="Save generated plan JSON" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
+              <CheckBox Content="Copy source resources to output before renaming" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}" />
+              <Expander Header="Advanced" HorizontalAlignment="Stretch">
+                <StackPanel Spacing="8" Margin="0,8,0,0">
+                  <Button Content="Export XML"
+                          Command="{Binding ExportXmlCommand}"
+                          IsEnabled="{Binding CanExportXml}"
+                          HorizontalAlignment="Stretch" />
+                  <TextBlock Text="Male prefix" />
+                  <TextBox Text="{Binding MalePrefix, Mode=TwoWay}" />
+                  <TextBlock Text="Female prefix" />
+                  <TextBox Text="{Binding FemalePrefix, Mode=TwoWay}" />
+                  <CheckBox Content="Include debug client script" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" />
+                  <CheckBox Content="Include preview YMT XML" IsChecked="{Binding IncludeYmtXml, Mode=TwoWay}" />
+                  <CheckBox Content="Overwrite XML previews during export" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
+                  <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Text="Max component drawables" />
+                    <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerComponent, Mode=TwoWay}" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Max prop drawables" />
+                    <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerProp, Mode=TwoWay}" />
+                  </StackPanel>
+                </StackPanel>
+              </Expander>
+            </StackPanel>
+          </Border>
+
+          <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="section-title" Text="Paths" />
+              <TextBlock Text="Plan JSON" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding PlanPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowsePlan_Click" />
+              </Grid>
+              <TextBlock Text="Output location" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding OutputPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseOutput_Click" />
+              </Grid>
+              <TextBlock Text="Backup location" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding BackupRoot, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseBackup_Click" />
+              </Grid>
+            </StackPanel>
+          </Border>
+          <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+            <StackPanel Spacing="8">
+              <TextBlock Classes="section-title" Text="Restore Manifest Location" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0" Text="{Binding RestoreManifestPath, Mode=TwoWay}" />
+                <Button Grid.Column="1" Content="..." Click="BrowseRestoreManifest_Click" />
+              </Grid>
+              <Button Content="Restore Backup" Command="{Binding RestoreCommand}" IsEnabled="{Binding CanRestoreBackup}" HorizontalAlignment="Stretch" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
+        <Border Grid.Row="0" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
+          <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+            <TextBlock Text="{Binding Status}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+              <TextBlock Grid.Column="0" Text="{Binding CurrentStage}" />
+              <TextBlock Grid.Column="1" Text="{Binding ActivePath}" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+            </Grid>
+            <ProgressBar Grid.Row="2" Minimum="0" Maximum="100" Value="{Binding ProgressValue}" />
+          </Grid>
+        </Border>
+
+        <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
+          <TabItem Header="Resources">
+            <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="2">
+              <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
+                <Button Grid.Column="0" Content="Add Resource..." Click="BrowseResources_Click" />
+                <Button Grid.Column="1" Content="Remove" Click="RemoveResource_Click" />
+                <Button Grid.Column="2" Content="Clear" Click="ClearResources_Click" />
+                <Button Grid.Column="3" Content="Move Up" Command="{Binding MoveResourceUpCommand}" IsEnabled="{Binding CanMoveResourceUp}" />
+                <Button Grid.Column="4" Content="Move Down" Command="{Binding MoveResourceDownCommand}" IsEnabled="{Binding CanMoveResourceDown}" />
+                <TextBlock Grid.Column="5"
+                           Text="Top-to-bottom order is used for merge analysis."
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+              </Grid>
+              <ListBox Grid.Row="1"
+                       ItemsSource="{Binding ResourcePaths}"
+                       SelectedItem="{Binding SelectedResourcePath, Mode=TwoWay}" />
+            </Grid>
+          </TabItem>
+          <TabItem Header="Summary">
+            <ListBox ItemsSource="{Binding SummaryLines}" />
+          </TabItem>
+          <TabItem Header="Warnings">
+            <ListBox ItemsSource="{Binding Warnings}" />
+          </TabItem>
+          <TabItem Header="Errors">
+            <ListBox ItemsSource="{Binding Errors}" />
+          </TabItem>
+          <!-- <TabItem Header="Files">
+            <ListBox ItemsSource="{Binding Files}" />
+          </TabItem> -->
+          <TabItem Header="Restore">
+            <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="2">
+              <TextBox Grid.Row="0"
+                       Text="{Binding RestoreSummaryText}"
+                       IsReadOnly="True"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       MinHeight="112"
+                       MaxHeight="180" />
+              <ListBox Grid.Row="1"
+                       ItemsSource="{Binding RestoreActionLines}"
+                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                       ScrollViewer.VerticalScrollBarVisibility="Visible">
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="Padding" Value="2,0" />
+                    <Setter Property="Focusable" Value="False" />
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}"
+                               FontFamily="Consolas, DejaVu Sans Mono"
+                               FontSize="12"
+                               LineHeight="15"
+                               TextWrapping="NoWrap" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </TabItem>
+          <TabItem Header="Log">
+            <ListBox ItemsSource="{Binding LogLines}" >
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                  <Setter Property="MinHeight" Value="0" />
+                  <Setter Property="Padding" Value="2,0" />
+                  <Setter Property="Focusable" Value="False" />
+                </Style>
+              </ListBox.Styles>
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}"
+                             FontFamily="Consolas, DejaVu Sans Mono"
+                             FontSize="12"
+                             LineHeight="15"
+                             TextWrapping="NoWrap" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </TabItem>
+        </TabControl>
+      </Grid>
+    </Grid>
+  </Grid>
+</Window>

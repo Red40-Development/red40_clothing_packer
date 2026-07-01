@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ClothingRepacker.CodeWalker;
 using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
@@ -43,7 +44,7 @@ public class ApplyRestoreTests
     }
 
     [Fact]
-    public async Task ApplyLeavesNonFreemodeSourceFilesUnmodifiedAndCreatesStandaloneResource()
+    public async Task ApplyLeavesNonFreemodeSourceFilesUnmodifiedWhenCopyModeIsOff()
     {
         var root = Path.Combine(Path.GetTempPath(), $"non-freemode-apply-test-{Guid.NewGuid():N}");
         var resources = Path.Combine(root, "resources");
@@ -68,9 +69,216 @@ public class ApplyRestoreTests
         Assert.Equal(ymtBefore, await File.ReadAllTextAsync(sourceYmt));
         Assert.Equal(drawableBefore, await File.ReadAllTextAsync(sourceDrawable));
         Assert.DoesNotContain(entries, entry => entry.Kind == "old-ymt");
-        Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack")));
-        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack", "stream", "a_c_horse_01_horse_pack.ymt.xml")));
-        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack", "stream", "a_c_horse_01_horse_pack^uppr_000_u.ydd")));
+        Assert.False(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
+        Assert.False(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta_standalone_animal_pack")));
+    }
+
+    [Fact]
+    public async Task ApplyCopiesNonFreemodeSourceResourceToGeneratedRootWhenCopyModeIsOn()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"non-freemode-copy-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "animal_pack");
+        var stream = Path.Combine(resourceRoot, "stream");
+        Directory.CreateDirectory(stream);
+
+        var sourceYmt = Path.Combine(stream, "a_c_horse_01_horse_pack.ymt.xml");
+        var sourceDrawable = Path.Combine(stream, "a_c_horse_01_horse_pack^uppr_000_u.ydd");
+        BuildMinimalPedVariationXml("horse_pack").Save(sourceYmt);
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "animal_pack");
+        Assert.True(File.Exists(sourceYmt));
+        Assert.True(File.Exists(sourceDrawable));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "a_c_horse_01_horse_pack.ymt.xml")));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "a_c_horse_01_horse_pack^uppr_000_u.ydd")));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+        Assert.Contains(entries, entry => entry.Kind == "generated-resource" && entry.AppliedPath == copiedResource);
+    }
+
+    [Fact]
+    public async Task ApplyUsesExplicitGeneratedResourcesRootFromPlan()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-generated-root-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var sourceDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"));
+
+        Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+        Assert.False(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
+    }
+
+    [Fact]
+    public async Task ApplyHonorsGeneratedOutputIncludeOptions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"apply-include-options-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var sourceDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            IncludeYmtXml = false,
+            IncludeDebugClient = false,
+        });
+
+        var generatedResource = Path.Combine(generatedRoot, "zz_merged_clothing_meta");
+        Assert.True(Directory.Exists(generatedResource));
+        Assert.Empty(Directory.GetFiles(generatedResource, "*.xml", SearchOption.AllDirectories));
+        Assert.False(File.Exists(Path.Combine(generatedResource, "client", "validate_collections.lua")));
+        Assert.DoesNotContain("client_script", await File.ReadAllTextAsync(Path.Combine(generatedResource, "fxmanifest.lua")));
+    }
+
+    [Fact]
+    public async Task ApplyCanCopyResourcesToOutputBeforeRenaming()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var originalYmt = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
+        var originalDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        var malformedDrawable = Path.Combine(resourceRoot, "stream", "bigb^decl_000_u.ydd");
+        await File.WriteAllTextAsync(originalDrawable, "drawable");
+        await File.WriteAllTextAsync(malformedDrawable, "malformed");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "gang_flags");
+        var copiedYmt = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
+        var copiedDrawable = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        var copiedMalformedDrawable = Path.Combine(copiedResource, "stream", "bigb^decl_000_u.ydd");
+
+        Assert.True(File.Exists(originalYmt));
+        Assert.True(File.Exists(originalDrawable));
+        Assert.True(File.Exists(malformedDrawable));
+        Assert.False(File.Exists(copiedYmt));
+        Assert.False(File.Exists(copiedDrawable));
+        Assert.True(File.Exists(copiedMalformedDrawable));
+        Assert.True(Directory.Exists(copiedResource));
+        Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+        Assert.Contains(entries, entry => entry.Kind == "stream-rename" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(entries, entry => entry.Kind == "old-ymt" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
+
+        var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        await service.RestoreAsync(manifest);
+
+        Assert.True(File.Exists(originalYmt));
+        Assert.True(File.Exists(originalDrawable));
+        Assert.False(Directory.Exists(copiedResource));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+    }
+
+    [Fact]
+    public async Task ApplyCopyModePreservesResourceDirectoryWhenPathsHaveTrailingSeparators()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-trailing-slash-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var originalDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(originalDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(
+            [resourceRoot + Path.DirectorySeparatorChar],
+            generatedRoot + Path.DirectorySeparatorChar,
+            "zz_merged_clothing_meta",
+            new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "gang_flags");
+        Assert.True(Directory.Exists(copiedResource));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "fxmanifest.lua")));
+        Assert.True(Directory.Exists(Path.Combine(copiedResource, "stream")));
+        Assert.False(File.Exists(Path.Combine(generatedRoot, "gang_flagsfxmanifest.lua")));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "gang_flagsstream")));
+    }
+
+    [Fact]
+    public async Task ApplyCopyModeRejectsOutputThatWouldOverwriteSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-unsafe-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], resources, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+            {
+                CopyResourcesToOutputBeforeRename = true,
+            }));
+
+        Assert.Contains("output root separate", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(Path.Combine(resourceRoot, "gang_flags")));
+        Assert.False(Directory.Exists(Path.Combine(resources, "zz_merged_clothing_meta")));
+    }
+
+    [Fact]
+    public async Task ApplyFallsBackForOldPlansWithoutGeneratedResourcesRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"old-plan-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
+
+        var sourceDrawable = Path.Combine(resources, "gang_flags", "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var planPath = Path.Combine(root, "old-plan.json");
+        await service.SavePlanAsync(analyze.Plan, planPath);
+        var json = JsonNode.Parse(await File.ReadAllTextAsync(planPath))!.AsObject();
+        json["generatedResourcesRoot"] = string.Empty;
+        json["resourceRoots"] = new JsonArray();
+        await File.WriteAllTextAsync(planPath, json.ToJsonString());
+        var oldPlan = await service.LoadPlanAsync(planPath);
+
+        await service.ApplyAsync(oldPlan, Path.Combine(root, "backups"));
+
+        Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
     }
 
     [Fact]

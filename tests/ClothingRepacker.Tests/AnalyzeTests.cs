@@ -78,7 +78,7 @@ public class AnalyzeTests
     }
 
     [Fact]
-    public async Task AnalyzeAndBuildCopyNonFreemodePedsIntoStandaloneResource()
+    public async Task AnalyzeAndBuildSkipsNonFreemodePeds()
     {
         var root = Path.Combine(Path.GetTempPath(), $"non-freemode-standalone-test-{Guid.NewGuid():N}");
         var resources = Path.Combine(root, "resources");
@@ -96,13 +96,11 @@ public class AnalyzeTests
 
         var build = await service.BuildAsync(analyze.Plan, outputRoot);
 
-        var standalone = Assert.Single(analyze.Plan.StandaloneResources);
         Assert.Empty(analyze.Plan.TargetCollections);
-        Assert.Equal("zz_merged_clothing_meta_standalone_animal_pack", standalone.OutputResource);
-        Assert.Contains(standalone.Files, file => file.SourcePath == ymtPath);
-        Assert.Contains(standalone.Files, file => file.SourcePath == drawablePath);
-        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack.ymt.xml", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(build.WrittenFiles, file => file.EndsWith("zz_merged_clothing_meta_standalone_animal_pack/stream/a_c_horse_01_horse_pack^uppr_000_u.ydd", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(analyze.Plan.StandaloneResources);
+        Assert.Empty(build.WrittenFiles);
+        Assert.False(Directory.Exists(Path.Combine(outputRoot, "zz_merged_clothing_meta")));
+        Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("Non-freemode YMT skipped", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -123,7 +121,10 @@ public class AnalyzeTests
         });
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot);
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
 
         Assert.Empty(analyze.Plan.Errors);
         Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("will be split across 2 target collections", StringComparison.OrdinalIgnoreCase));
@@ -142,6 +143,114 @@ public class AnalyzeTests
 
         Assert.Equal(128, firstXml.Root!.Element("aComponentData3")!.Element("Item")!.Element("aDrawblData3")!.Elements("Item").Count());
         Assert.Single(secondXml.Root!.Element("aComponentData3")!.Element("Item")!.Element("aDrawblData3")!.Elements("Item"));
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersScansOnlySelectedResources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-scan-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        var sibling = Path.Combine(resources, "gang_outfits");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_outfits"), sibling);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([selected], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.NotEmpty(analyze.Plan.SourceYmts);
+        Assert.All(analyze.Plan.SourceYmts, source => Assert.Equal("gang_flags", source.Resource));
+        Assert.DoesNotContain(analyze.Plan.SourceYmts, source => source.Resource.Equals("gang_outfits", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal([Path.GetFullPath(selected)], analyze.Plan.ResourceRoots);
+        Assert.Equal(Path.GetFullPath(Path.Combine(root, "generated")), analyze.Plan.GeneratedResourcesRoot);
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersRejectsOutputInsideSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-nested-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync([selected], Path.Combine(selected, "output"), "zz_merged_clothing_meta", new MergePlanSettings()));
+
+        Assert.Contains("outside selected resource folders", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersRejectsCopyModeOutputThatWouldOverwriteSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-copy-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AnalyzeAsync([selected], resources, "zz_merged_clothing_meta", new MergePlanSettings
+            {
+                RenameStreamsInPlace = false,
+            }));
+
+        Assert.Contains("output root separate", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildRejectsOutputInsideSelectedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"build-nested-output-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var selected = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), selected);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([selected], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.BuildAsync(analyze.Plan, Path.Combine(selected, "preview")));
+
+        Assert.Contains("outside selected resource folders", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersMergesMultipleSelectedResources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-multi-resource-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var first = Path.Combine(resources, "gang_flags");
+        var second = Path.Combine(resources, "gang_outfits");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), first);
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_outfits"), second);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([first, second], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.Contains(analyze.Plan.SourceYmts, source => source.Resource.Equals("gang_flags", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(analyze.Plan.SourceYmts, source => source.Resource.Equals("gang_outfits", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(2, analyze.Plan.ResourceRoots.Count);
+    }
+
+    [Fact]
+    public async Task AnalyzeExplicitResourceFoldersPreservesInputOrder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-order-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var first = Path.Combine(resources, "z_pack");
+        var second = Path.Combine(resources, "a_pack");
+        Directory.CreateDirectory(Path.Combine(first, "stream"));
+        Directory.CreateDirectory(Path.Combine(second, "stream"));
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "fxmanifest.lua"), "fx_version 'cerulean'");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([first, second], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], analyze.Plan.ResourceRoots);
     }
 
     private static XDocument BuildMinimalPedVariationXml(string collectionName)

@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\ClothingRepacker.Cli\ClothingRepacker.Cli.csproj" />
     <ProjectReference Include="..\..\src\ClothingRepacker.CodeWalker\ClothingRepacker.CodeWalker.csproj" />
     <ProjectReference Include="..\..\src\ClothingRepacker.Core\ClothingRepacker.Core.csproj" />
+    <ProjectReference Include="..\..\src\ClothingRepacker.Gui\ClothingRepacker.Gui.csproj" />
   </ItemGroup>
 
   <ItemGroup>

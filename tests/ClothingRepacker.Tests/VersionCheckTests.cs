@@ -1,3 +1,5 @@
+using ClothingRepacker.Core;
+
 public class VersionCheckTests
 {
     [Theory]

@@ -248,7 +248,7 @@ public sealed class PedVariationReader
             return false;
         }
 
-        return int.TryParse(attribute.Value, out value);
+        return XmlHelpers.TryParseIntValue(attribute.Value, out value);
     }
 
     private static int GetValue(XElement item, string name)
