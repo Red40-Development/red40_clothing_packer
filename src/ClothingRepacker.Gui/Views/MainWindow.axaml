@@ -36,10 +36,40 @@
                      Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>
         <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Bottom">
-          <Image Source="avares://ClothingRepacker.Gui/Assets/red40_logo.png"
-                 Height="72"
-                 Stretch="UniformToFill"
-                 HorizontalAlignment="Right" />
+          <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <StackPanel Spacing="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+              <TextBlock Text="Like this software?"
+                         FontSize="12"
+                         HorizontalAlignment="Right"
+                         Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+              <Button Click="TeamSupport_Click"
+                      MinHeight="0"
+                      Padding="0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      Cursor="Hand"
+                      ToolTip.Tip="Support our team"
+                      HorizontalAlignment="Right">
+                <TextBlock Text="Support our team"
+                           FontSize="12"
+                           TextDecorations="Underline"
+                           Foreground="#2B6CB0" />
+              </Button>
+            </StackPanel>
+            <Button Click="StoreLogo_Click"
+                    MinHeight="0"
+                    Padding="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    ToolTip.Tip="Open Red40 Store"
+                    HorizontalAlignment="Right">
+              <Image Source="avares://ClothingRepacker.Gui/Assets/red40_logo.png"
+                     Height="72"
+                     Stretch="UniformToFill"
+                     HorizontalAlignment="Right" />
+            </Button>
+          </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Content="Help" Command="{Binding HelpCommand}" />
             <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />

@@ -9,6 +9,10 @@ namespace ClothingRepacker.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private const string StoreUrl = "https://red40.dev/";
+    private const string SupportUrl = "https://red40.dev/support";
+    private const string TeamSupportUrl = "https://slrn.dev/ko-fi";
+
     private MainWindowViewModel? _subscribedViewModel;
 
     public MainWindow()
@@ -151,18 +155,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        try
-        {
-            Process.Start(new ProcessStartInfo(vm.UpdateReleaseUrl)
-            {
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            await ShowMessageAsync("Could not open update", ex.Message);
-        }
+        await OpenExternalUrlAsync(vm.UpdateReleaseUrl, "Could not open update");
     }
+
+    private async void StoreLogo_Click(object? sender, RoutedEventArgs e)
+        => await OpenExternalUrlAsync(StoreUrl, "Could not open store");
+
+    private async void TeamSupport_Click(object? sender, RoutedEventArgs e)
+        => await OpenExternalUrlAsync(TeamSupportUrl, "Could not open support page");
 
     private void DragOver(object? sender, DragEventArgs e)
     {
@@ -370,12 +370,27 @@ public partial class MainWindow : Window
             Content = "OK",
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
         };
+        var supportLinkButton = new Button
+        {
+            MinHeight = 0,
+            Padding = new Avalonia.Thickness(0),
+            Background = Avalonia.Media.Brushes.Transparent,
+            BorderThickness = new Avalonia.Thickness(0),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
+            Content = new TextBlock
+            {
+                Text = "Red40 Support",
+                TextDecorations = Avalonia.Media.TextDecorations.Underline,
+                Foreground = Avalonia.Media.Brush.Parse("#2B6CB0"),
+            },
+        };
 
         var dialog = new Window
         {
             Title = "How to use Red40 Clothing Repacker",
             Width = 560,
-            Height = 340,
+            Height = 370,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             CanResize = false,
             Content = new StackPanel
@@ -398,14 +413,44 @@ public partial class MainWindow : Window
                                + "5. Click Apply when ready. Backups are written before source files are changed.",
                         TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                     },
+                    new StackPanel
+                    {
+                        Orientation = Avalonia.Layout.Orientation.Horizontal,
+                        Spacing = 4,
+                        Children =
+                        {
+                            new TextBlock
+                            {
+                                Text = "Need more help or have feature suggestions?",
+                                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                            },
+                            supportLinkButton,
+                        },
+                    },
                     closeButton,
                 }
             }
         };
 
+        supportLinkButton.Click += async (_, _) => await OpenExternalUrlAsync(SupportUrl, "Could not open support");
         closeButton.Click += (_, _) => dialog.Close();
 
         await dialog.ShowDialog(this);
+    }
+
+    private async Task OpenExternalUrlAsync(string url, string errorTitle)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(url)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            await ShowMessageAsync(errorTitle, ex.Message);
+        }
     }
 
     private async Task ShowMessageAsync(string title, string message)
