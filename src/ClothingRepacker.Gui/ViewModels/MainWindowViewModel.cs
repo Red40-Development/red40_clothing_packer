@@ -67,6 +67,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ApplyCommand = new AsyncRelayCommand(ApplyAsync, CanApply);
         RestoreCommand = new AsyncRelayCommand(RestoreAsync, CanRestore);
         CancelCommand = new RelayCommand(CancelOperation, () => IsBusy);
+        HelpCommand = new RelayCommand(RequestHelp);
         MoveResourceUpCommand = new RelayCommand(MoveSelectedResourceFolderUp, CanMoveSelectedResourceFolderUp);
         MoveResourceDownCommand = new RelayCommand(MoveSelectedResourceFolderDown, CanMoveSelectedResourceFolderDown);
 
@@ -80,8 +81,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncRelayCommand ApplyCommand { get; }
     public AsyncRelayCommand RestoreCommand { get; }
     public RelayCommand CancelCommand { get; }
+    public RelayCommand HelpCommand { get; }
     public RelayCommand MoveResourceUpCommand { get; }
     public RelayCommand MoveResourceDownCommand { get; }
+
+    public event EventHandler? HelpRequested;
 
     public ObservableCollection<string> SummaryLines { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
@@ -419,6 +423,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public int PlannedBackupCount => (_lastPlan?.TargetCollections.SelectMany(target => target.SourceYmts).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0)
         + (_lastPlan?.BrokenCreatureMetadataBackups.Count ?? 0);
+
+    private void RequestHelp()
+        => HelpRequested?.Invoke(this, EventArgs.Empty);
 
     public void SelectResourcesFolder(string path)
     {

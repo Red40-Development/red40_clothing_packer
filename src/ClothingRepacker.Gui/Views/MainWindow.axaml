@@ -11,10 +11,11 @@
     <Border Grid.Row="0" Padding="16,14" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
       <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="8">
         <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
-          <TextBlock Classes="section-title" Text="Red40 Clothing Repacker" />
-          <TextBlock Text="{Binding ProjectDisplayName}"
-                     Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
           <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Classes="section-title"
+                       Text="Red40 Clothing Repacker"
+                       Margin="0"
+                       VerticalAlignment="Center" />
             <TextBlock Text="{Binding VersionCheckText}"
                        VerticalAlignment="Center"
                        Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
@@ -31,7 +32,7 @@
                          Foreground="#2B6CB0" />
             </Button>
           </StackPanel>
-          <TextBlock Text="Manage resource folders in the Resources tab."
+          <TextBlock Text="{Binding ProjectDisplayName}"
                      Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
         </StackPanel>
         <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Bottom">
@@ -40,16 +41,13 @@
                  Stretch="UniformToFill"
                  HorizontalAlignment="Right" />
           <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="Help" Command="{Binding HelpCommand}" />
             <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
             <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
             <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
             <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
           </StackPanel>
         </StackPanel>
-        <TextBlock Grid.Column="0"
-                   Grid.Row="1"
-                   Text="Drag and drop one or more resource folders anywhere in this window to add them."
-                   Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
         <StackPanel Grid.Column="0" Grid.Row="2" Orientation="Horizontal" Spacing="8">
           <Button Content="Open Project..." Click="OpenProject_Click" IsEnabled="{Binding CanEditProject}" />
           <Button Content="Save Project" Click="SaveProject_Click" IsEnabled="{Binding CanEditProject}" />

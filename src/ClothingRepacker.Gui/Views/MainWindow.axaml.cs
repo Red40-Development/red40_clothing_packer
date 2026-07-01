@@ -9,14 +9,34 @@ namespace ClothingRepacker.Gui.Views;
 
 public partial class MainWindow : Window
 {
+    private MainWindowViewModel? _subscribedViewModel;
+
     public MainWindow()
     {
         InitializeComponent();
+        DataContextChanged += (_, _) => AttachViewModelEvents();
         AddHandler(DragDrop.DragOverEvent, DragOver);
         AddHandler(DragDrop.DropEvent, Drop);
     }
 
     private MainWindowViewModel? ViewModel => DataContext as MainWindowViewModel;
+
+    private void AttachViewModelEvents()
+    {
+        if (_subscribedViewModel is not null)
+        {
+            _subscribedViewModel.HelpRequested -= ViewModel_HelpRequested;
+        }
+
+        _subscribedViewModel = ViewModel;
+        if (_subscribedViewModel is not null)
+        {
+            _subscribedViewModel.HelpRequested += ViewModel_HelpRequested;
+        }
+    }
+
+    private async void ViewModel_HelpRequested(object? sender, EventArgs e)
+        => await ShowHelpAsync();
 
     private async void BrowseResources_Click(object? sender, RoutedEventArgs e)
     {
@@ -342,6 +362,51 @@ public partial class MainWindow : Window
     }
 
     private sealed record ApplyDialogContent(Panel Panel, Button ApplyButton, Button CancelButton);
+
+    private async Task ShowHelpAsync()
+    {
+        var closeButton = new Button
+        {
+            Content = "OK",
+            HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
+        };
+
+        var dialog = new Window
+        {
+            Title = "How to use Red40 Clothing Repacker",
+            Width = 560,
+            Height = 340,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            CanResize = false,
+            Content = new StackPanel
+            {
+                Margin = new Avalonia.Thickness(18),
+                Spacing = 12,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Basic workflow",
+                        FontWeight = Avalonia.Media.FontWeight.SemiBold,
+                    },
+                    new TextBlock
+                    {
+                        Text = "1. Add one or more clothing resource folders with Add Resource or drag and drop.\n"
+                               + "2. Set the merged resource name, target prefix, output location, and backup location.\n"
+                               + "3. Click Analyze and review the Summary, Warnings, and Errors tabs.\n"
+                               + "4. Click Build Preview to generate the merged output and inspect the results.\n"
+                               + "5. Click Apply when ready. Backups are written before source files are changed.",
+                        TextWrapping = Avalonia.Media.TextWrapping.Wrap,
+                    },
+                    closeButton,
+                }
+            }
+        };
+
+        closeButton.Click += (_, _) => dialog.Close();
+
+        await dialog.ShowDialog(this);
+    }
 
     private async Task ShowMessageAsync(string title, string message)
     {
