@@ -284,6 +284,9 @@ public sealed class RepackerService
             metadata.Kind,
             CountAlternateMetadataItems(metadata))).ToList();
         var alternateMetadataOutputs = BuildAlternateMetadataOutputPlans(alternateMetadata, targetResource);
+        var sourceAlternateMetadataBackups = alternateMetadata.Select(metadata => new SourceAlternateMetadataBackupPlan(
+            metadata.Path,
+            Path.Combine(metadata.ResourceName, Path.GetRelativePath(metadata.ResourceRoot, metadata.Path)).Replace(Path.DirectorySeparatorChar, '/'))).ToList();
 
         progress?.Report(new OperationProgress(
             "analyze",
@@ -321,6 +324,7 @@ public sealed class RepackerService
             CreatureMetadataOutputs = creatureMetadataOutputs,
             SourceAlternateMetadata = sourceAlternateMetadataSummaries,
             AlternateMetadataOutputs = alternateMetadataOutputs,
+            SourceAlternateMetadataBackups = sourceAlternateMetadataBackups,
             Warnings = warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             Errors = errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
         };
@@ -678,6 +682,8 @@ public sealed class RepackerService
             ? GetResourceRootsForCopy(plan)
             : [];
         var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
+        var sourceAlternateMetadataBackups = GetSourceAlternateMetadataBackupPlans(plan);
+        var sourceBackupPlanCount = mergedSourceYmtPaths.Count + plan.BrokenCreatureMetadataBackups.Count + sourceAlternateMetadataBackups.Count;
         ValidateGeneratedResourcesRoot(
             GetKnownResourceRoots(plan),
             generatedResourcesRoot,
@@ -688,10 +694,10 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "start",
-            Total: resourceRootsToCopy.Count + plan.StreamRenames.Count + mergedSourceYmtPaths.Count + plan.BrokenCreatureMetadataBackups.Count,
+            Total: resourceRootsToCopy.Count + plan.StreamRenames.Count + sourceBackupPlanCount,
             Message: options.CopyResourcesToOutputBeforeRename
                 ? $"Preparing to copy {resourceRootsToCopy.Count} source resources, then apply {plan.StreamRenames.Count} stream renames to the output copy."
-                : $"Preparing to apply {plan.StreamRenames.Count} stream renames, {mergedSourceYmtPaths.Count} YMT backups, and {plan.BrokenCreatureMetadataBackups.Count} broken creature metadata backups."));
+                : $"Preparing to apply {plan.StreamRenames.Count} stream renames and {sourceBackupPlanCount} source backups."));
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -740,7 +746,7 @@ public sealed class RepackerService
                 plan.StreamRenames.Count,
                 targetPath,
                 RenameCount: index + 1,
-                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
+                BackupCount: entries.Count(IsSourceBackupEntry)));
         }
 
         var mergedSources = plan.SourceYmts
@@ -770,7 +776,7 @@ public sealed class RepackerService
                 mergedSources.Count,
                 sourcePath,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
+                BackupCount: entries.Count(IsSourceBackupEntry)));
         }
 
         for (var index = 0; index < plan.BrokenCreatureMetadataBackups.Count; index++)
@@ -796,7 +802,33 @@ public sealed class RepackerService
                 mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
                 sourcePath,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
+                BackupCount: entries.Count(IsSourceBackupEntry)));
+        }
+
+        for (var index = 0; index < sourceAlternateMetadataBackups.Count; index++)
+        {
+            var source = sourceAlternateMetadataBackups[index];
+            var sourcePath = pathMap.Map(source.SourcePath);
+            if (!File.Exists(sourcePath))
+            {
+                continue;
+            }
+
+            var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+            File.Copy(sourcePath, backupPath, overwrite: true);
+            var beforeHash = ComputeSha256(sourcePath);
+            File.Delete(sourcePath);
+            entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+
+            progress?.Report(new OperationProgress(
+                "apply",
+                "backup-source-metadata",
+                mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count + index + 1,
+                sourceBackupPlanCount,
+                sourcePath,
+                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+                BackupCount: entries.Count(IsSourceBackupEntry)));
         }
 
         if (plan.TargetCollections.Count > 0)
@@ -842,7 +874,7 @@ public sealed class RepackerService
                 ? $"Copied generated resource to {Path.Combine(generatedResourcesRoot, plan.TargetResource)}."
                 : "No merged freemode resource was generated.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"),
+            BackupCount: entries.Count(IsSourceBackupEntry),
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
         var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
@@ -851,11 +883,11 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "complete",
-            plan.StreamRenames.Count + mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
-            plan.StreamRenames.Count + mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
+            plan.StreamRenames.Count + sourceBackupPlanCount,
+            plan.StreamRenames.Count + sourceBackupPlanCount,
             Message: $"Apply complete. Backup manifest written to {manifestPath}.",
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"),
+            BackupCount: entries.Count(IsSourceBackupEntry),
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
         return entries;
@@ -865,6 +897,24 @@ public sealed class RepackerService
         => !string.IsNullOrWhiteSpace(plan.GeneratedResourcesRoot)
             ? Path.GetFullPath(plan.GeneratedResourcesRoot)
             : Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot;
+
+    private static IReadOnlyList<SourceAlternateMetadataBackupPlan> GetSourceAlternateMetadataBackupPlans(MergePlan plan)
+    {
+        if (plan.SourceAlternateMetadataBackups.Count > 0)
+        {
+            return plan.SourceAlternateMetadataBackups;
+        }
+
+        return plan.SourceAlternateMetadata
+            .Select(source => new SourceAlternateMetadataBackupPlan(
+                source.Path,
+                Path.Combine(source.Resource, Path.GetFileName(source.Path)).Replace(Path.DirectorySeparatorChar, '/')))
+            .DistinctBy(source => source.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool IsSourceBackupEntry(BackupEntry entry)
+        => entry.Kind is "old-ymt" or "broken-creature-metadata" or "source-alternate-metadata";
 
     private static ResourcePathMap CopySourceResourcesToOutput(
         IReadOnlyList<string> resourceRoots,
@@ -904,7 +954,7 @@ public sealed class RepackerService
                 index + 1,
                 resourceRoots.Count,
                 destinationRoot,
-                BackupCount: entries.Count(entry => entry.Kind is "old-ymt" or "broken-creature-metadata")));
+                BackupCount: entries.Count(IsSourceBackupEntry)));
         }
 
         return new ResourcePathMap(mappings);
@@ -1145,7 +1195,7 @@ public sealed class RepackerService
                 entry));
         }
 
-        foreach (var entry in entries.Where(entry => entry.Kind is "old-ymt" or "broken-creature-metadata"))
+        foreach (var entry in entries.Where(IsSourceBackupEntry))
         {
             var action = new RestoreAction(
                 "copy-backup-file",

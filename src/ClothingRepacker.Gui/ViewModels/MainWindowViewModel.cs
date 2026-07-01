@@ -424,7 +424,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public bool HasRestoreManifestPreview => _restorePreview is not null;
 
     public int PlannedBackupCount => (_lastPlan?.TargetCollections.SelectMany(target => target.SourceYmts).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0)
-        + (_lastPlan?.BrokenCreatureMetadataBackups.Count ?? 0);
+        + (_lastPlan?.BrokenCreatureMetadataBackups.Count ?? 0)
+        + (_lastPlan?.SourceAlternateMetadataBackups.Count ?? 0);
 
     private void RequestHelp()
         => HelpRequested?.Invoke(this, EventArgs.Empty);

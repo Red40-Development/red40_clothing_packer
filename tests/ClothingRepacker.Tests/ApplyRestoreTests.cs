@@ -166,8 +166,12 @@ public class ApplyRestoreTests
         var originalYmt = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
         var originalDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
         var malformedDrawable = Path.Combine(resourceRoot, "stream", "bigb^decl_000_u.ydd");
+        var originalAlternateVariations = Path.Combine(resourceRoot, "pedalternatevariations.meta");
+        var originalFirstPersonAlternates = Path.Combine(resourceRoot, "first_person_alternates.meta");
         await File.WriteAllTextAsync(originalDrawable, "drawable");
         await File.WriteAllTextAsync(malformedDrawable, "malformed");
+        BuildAlternateVariations().Save(originalAlternateVariations);
+        BuildFirstPersonAlternates().Save(originalFirstPersonAlternates);
 
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
@@ -181,17 +185,24 @@ public class ApplyRestoreTests
         var copiedYmt = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
         var copiedDrawable = Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
         var copiedMalformedDrawable = Path.Combine(copiedResource, "stream", "bigb^decl_000_u.ydd");
+        var copiedAlternateVariations = Path.Combine(copiedResource, "pedalternatevariations.meta");
+        var copiedFirstPersonAlternates = Path.Combine(copiedResource, "first_person_alternates.meta");
 
         Assert.True(File.Exists(originalYmt));
         Assert.True(File.Exists(originalDrawable));
         Assert.True(File.Exists(malformedDrawable));
+        Assert.True(File.Exists(originalAlternateVariations));
+        Assert.True(File.Exists(originalFirstPersonAlternates));
         Assert.False(File.Exists(copiedYmt));
         Assert.False(File.Exists(copiedDrawable));
         Assert.True(File.Exists(copiedMalformedDrawable));
+        Assert.False(File.Exists(copiedAlternateVariations));
+        Assert.False(File.Exists(copiedFirstPersonAlternates));
         Assert.True(Directory.Exists(copiedResource));
         Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
         Assert.Contains(entries, entry => entry.Kind == "stream-rename" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
         Assert.Contains(entries, entry => entry.Kind == "old-ymt" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(2, entries.Count(entry => entry.Kind == "source-alternate-metadata" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase)));
 
         var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
         await service.RestoreAsync(manifest);
@@ -308,6 +319,38 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(creatureMetadataPath));
     }
 
+    [Fact]
+    public async Task ApplyBacksUpAndRestoresSourceAlternateMetadata()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"alternate-metadata-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var alternateVariations = Path.Combine(resourceRoot, "pedalternatevariations.meta");
+        var firstPersonAlternates = Path.Combine(resourceRoot, "first_person_alternates.meta");
+        BuildAlternateVariations().Save(alternateVariations);
+        BuildFirstPersonAlternates().Save(firstPersonAlternates);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"));
+
+        Assert.Equal(2, analyze.Plan.SourceAlternateMetadataBackups.Count);
+        Assert.False(File.Exists(alternateVariations));
+        Assert.False(File.Exists(firstPersonAlternates));
+        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta", "data", "pedalternatevariations.meta")));
+        Assert.True(File.Exists(Path.Combine(root, "zz_merged_clothing_meta", "data", "first_person_alternates.meta")));
+        Assert.Equal(2, entries.Count(entry => entry.Kind == "source-alternate-metadata" && entry.BackupPath is not null && File.Exists(entry.BackupPath)));
+
+        var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        await service.RestoreAsync(manifest);
+
+        Assert.True(File.Exists(alternateVariations));
+        Assert.True(File.Exists(firstPersonAlternates));
+    }
+
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
         => new(
             new XElement("CPedVariationInfo",
@@ -323,4 +366,26 @@ public class ApplyRestoreTests
                 new XElement("shaderVariableComponents", new XAttribute("itemType", "CShaderVariableComponent")),
                 new XElement("pedPropExpressions", new XAttribute("itemType", "CPedPropExpressionData")),
                 new XElement("pedCompExpressions", new XAttribute("itemType", "CPedCompExpressionData"))));
+
+    private static XDocument BuildAlternateVariations()
+        => new(
+            new XElement("CAlternateVariations",
+                new XElement("peds",
+                    new XElement("Item",
+                        new XElement("name", "mp_f_freemode_01"),
+                        new XElement("switches",
+                            new XElement("Item",
+                                new XElement("dlcNameHash", "mp_f_gang_flags"),
+                                new XElement("component", new XAttribute("value", 11)),
+                                new XElement("index", new XAttribute("value", 0)),
+                                new XElement("alt", new XAttribute("value", 1)),
+                                new XElement("sourceAssets")))))));
+
+    private static XDocument BuildFirstPersonAlternates()
+        => new(
+            new XElement("FirstPersonAlternateData",
+                new XElement("alternates",
+                    new XElement("Item",
+                        new XElement("assetName", "MP_F_Freemode_01_mp_f_gang_flags/jbib_000_u"),
+                        new XElement("alternate", new XAttribute("value", 1))))));
 }
