@@ -496,6 +496,13 @@ public sealed class MainWindowViewModel : ViewModelBase
                 continue;
             }
 
+            if (IsBracketFolder(path))
+            {
+                var resourcesUnderBracketFolder = FindResourceFoldersUnder(path);
+                resources.AddRange(resourcesUnderBracketFolder.Count > 0 ? resourcesUnderBracketFolder : [path]);
+                continue;
+            }
+
             if (IsResourceFolder(path))
             {
                 resources.Add(path);
@@ -506,6 +513,14 @@ public sealed class MainWindowViewModel : ViewModelBase
                 .Where(IsResourceFolder)
                 .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            foreach (var bracketFolder in Directory.GetDirectories(path)
+                         .Where(IsBracketFolder)
+                         .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase))
+            {
+                childResources.AddRange(FindResourceFoldersUnder(bracketFolder));
+            }
+
             resources.AddRange(childResources.Count > 0 ? childResources : [path]);
         }
 
@@ -514,9 +529,33 @@ public sealed class MainWindowViewModel : ViewModelBase
             .ToList();
     }
 
+    private static IReadOnlyList<string> FindResourceFoldersUnder(string root)
+    {
+        var resources = new List<string>();
+        foreach (var directory in Directory.GetDirectories(root)
+                     .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase))
+        {
+            if (IsResourceFolder(directory))
+            {
+                resources.Add(directory);
+                continue;
+            }
+
+            resources.AddRange(FindResourceFoldersUnder(directory));
+        }
+
+        return resources;
+    }
+
     private static bool IsResourceFolder(string path)
         => File.Exists(Path.Combine(path, "fxmanifest.lua"))
            || File.Exists(Path.Combine(path, "__resource.lua"));
+
+    private static bool IsBracketFolder(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.Contains('[') && name.Contains(']');
+    }
 
     public void RemoveSelectedResourceFolder()
     {

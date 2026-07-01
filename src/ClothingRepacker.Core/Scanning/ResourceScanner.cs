@@ -20,19 +20,20 @@ public sealed class ResourceScanner
         var directories = Directory.GetDirectories(root)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var resourceDirectories = ExpandResourcesRootDirectories(directories);
 
         var results = new List<ResourceScanItem>();
-        for (var index = 0; index < directories.Count; index++)
+        for (var index = 0; index < resourceDirectories.Count; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var resourceDir = directories[index];
+            var resourceDir = resourceDirectories[index];
             progress?.Report(new OperationProgress(
                 "analyze",
                 "scan-resource",
                 index,
-                directories.Count,
+                resourceDirectories.Count,
                 resourceDir,
-                $"Scanning resource {index + 1}/{directories.Count}: {Path.GetFileName(resourceDir)}."));
+                $"Scanning resource {index + 1}/{resourceDirectories.Count}: {Path.GetFileName(resourceDir)}."));
 
             results.Add(ScanResourceFolder(resourceDir, cancellationToken));
 
@@ -40,9 +41,9 @@ public sealed class ResourceScanner
                 "analyze",
                 "scan-resource",
                 index + 1,
-                directories.Count,
+                resourceDirectories.Count,
                 resourceDir,
-                $"Scanned resource {index + 1}/{directories.Count}: {Path.GetFileName(resourceDir)}."));
+                $"Scanned resource {index + 1}/{resourceDirectories.Count}: {Path.GetFileName(resourceDir)}."));
         }
 
         return results;
@@ -57,9 +58,12 @@ public sealed class ResourceScanner
         var seenRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in resourceFolders.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath))
         {
-            if (seenRoots.Add(root))
+            foreach (var resourceRoot in ExpandSelectedResourceFolder(root))
             {
-                roots.Add(root);
+                if (seenRoots.Add(resourceRoot))
+                {
+                    roots.Add(resourceRoot);
+                }
             }
         }
 
@@ -116,6 +120,94 @@ public sealed class ResourceScanner
                 Path.GetExtension(path),
                 path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))).ToList(),
             files.FirstOrDefault(IsManifest));
+    }
+
+    private static IReadOnlyList<string> ExpandResourcesRootDirectories(IReadOnlyList<string> directories)
+    {
+        var resources = new List<string>();
+        foreach (var directory in directories)
+        {
+            if (IsBracketFolder(directory))
+            {
+                var childResources = FindResourceFoldersUnder(directory);
+                resources.AddRange(childResources.Count > 0 ? childResources : [directory]);
+                continue;
+            }
+
+            if (IsResourceFolder(directory))
+            {
+                resources.Add(directory);
+                continue;
+            }
+
+            resources.Add(directory);
+        }
+
+        return resources;
+    }
+
+    private static IReadOnlyList<string> ExpandSelectedResourceFolder(string root)
+    {
+        if (!Directory.Exists(root))
+        {
+            return [root];
+        }
+
+        if (IsBracketFolder(root))
+        {
+            var childResources = FindResourceFoldersUnder(root);
+            return childResources.Count > 0 ? childResources : [root];
+        }
+
+        if (IsResourceFolder(root))
+        {
+            return [root];
+        }
+
+        var resources = new List<string>();
+        resources.AddRange(Directory.GetDirectories(root)
+            .Where(IsResourceFolder)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase));
+
+        foreach (var bracketFolder in Directory.GetDirectories(root)
+                     .Where(IsBracketFolder)
+                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            resources.AddRange(FindResourceFoldersUnder(bracketFolder));
+        }
+
+        var expanded = resources
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return expanded.Count > 0 ? expanded : [root];
+    }
+
+    private static IReadOnlyList<string> FindResourceFoldersUnder(string root)
+    {
+        var resources = new List<string>();
+        foreach (var directory in Directory.GetDirectories(root)
+                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (IsResourceFolder(directory))
+            {
+                resources.Add(directory);
+                continue;
+            }
+
+            resources.AddRange(FindResourceFoldersUnder(directory));
+        }
+
+        return resources;
+    }
+
+    private static bool IsResourceFolder(string path)
+        => File.Exists(Path.Combine(path, "fxmanifest.lua"))
+           || File.Exists(Path.Combine(path, "__resource.lua"));
+
+    private static bool IsBracketFolder(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.Contains('[') && name.Contains(']');
     }
 
     private static bool IsManifest(string path)

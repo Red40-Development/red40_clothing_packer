@@ -166,6 +166,31 @@ public class AnalyzeTests
     }
 
     [Fact]
+    public async Task AnalyzeExplicitBracketFolderUsesChildResourceNamesForManifestDependencies()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"bracket-resource-dependency-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var category = Path.Combine(resources, "[clothing]");
+        var first = Path.Combine(category, "gang_flags");
+        var second = Path.Combine(category, "gang_outfits");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), first);
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_outfits"), second);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([category], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "preview");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var manifest = await File.ReadAllTextAsync(Path.Combine(outputRoot, "zz_merged_clothing_meta", "fxmanifest.lua"));
+        Assert.Contains("'gang_flags'", manifest, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'gang_outfits'", manifest, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("[clothing]", manifest, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], analyze.Plan.ResourceRoots);
+        Assert.DoesNotContain(analyze.Plan.SourceYmts, source => source.Resource.Contains('['));
+    }
+
+    [Fact]
     public async Task AnalyzeExplicitResourceFoldersRejectsOutputInsideSelectedResource()
     {
         var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-nested-output-test-{Guid.NewGuid():N}");

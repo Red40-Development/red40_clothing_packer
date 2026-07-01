@@ -304,6 +304,25 @@ public class GuiWorkflowTests
     }
 
     [Fact]
+    public void AddingResourcesRootExpandsBracketCategoryFolders()
+    {
+        var root = CreateTempDirectory("gui-bracket-resource-root");
+        var category = Path.Combine(root, "[clothing]");
+        var first = Path.Combine(category, "first_pack");
+        var second = Path.Combine(category, "second_pack");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "__resource.lua"), "resource_manifest_version '44febabe-d386-4d18-afbe-5e627f4af937'");
+        var vm = CreateViewModel();
+
+        vm.AddResourceFolders([root]);
+
+        Assert.Equal([first, second], vm.ResourcePaths.ToArray());
+        Assert.True(vm.CanAnalyzeResources);
+    }
+
+    [Fact]
     public void AddingSingleResourceFolderWithManifestAddsThatFolder()
     {
         var resource = CreateTempDirectory("gui-single-resource");
