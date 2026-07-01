@@ -52,28 +52,31 @@ public sealed class StreamRenamePlanner
                 continue;
             }
 
-            var drawablePattern = new Regex($"^{Regex.Escape(mapping.SourceFullCollection)}\\^{Regex.Escape(prefix)}_{mapping.OldPropIndex:000}(?<suffix>\\.(?:ydd|yld))$", RegexOptions.IgnoreCase);
-            var texturePattern = new Regex($"^{Regex.Escape(mapping.SourceFullCollection)}\\^{Regex.Escape(prefix)}_diff_{mapping.OldPropIndex:000}(?<suffix>_.+\\.ytd)$", RegexOptions.IgnoreCase);
-
-            foreach (var file in streamFiles.Where(file => !usedSources.Contains(file.FullPath)))
+            foreach (var collectionPair in BuildPropCollectionPairs(mapping))
             {
-                var newName = ReplaceFilename(file.FileName, drawablePattern, $"{mapping.TargetFullCollection}^{prefix}_{mapping.NewPropIndex:000}${{suffix}}")
-                    ?? ReplaceFilename(file.FileName, texturePattern, $"{mapping.TargetFullCollection}^{prefix}_diff_{mapping.NewPropIndex:000}${{suffix}}");
+                var drawablePattern = new Regex($"^{Regex.Escape(collectionPair.Source)}\\^{Regex.Escape(prefix)}_{mapping.OldPropIndex:000}(?<suffix>(?:_[^.]+)?\\.(?:ydd|yld))$", RegexOptions.IgnoreCase);
+                var texturePattern = new Regex($"^{Regex.Escape(collectionPair.Source)}\\^{Regex.Escape(prefix)}_diff_{mapping.OldPropIndex:000}(?<suffix>_.+\\.ytd)$", RegexOptions.IgnoreCase);
 
-                if (newName is null)
+                foreach (var file in streamFiles.Where(file => !usedSources.Contains(file.FullPath)))
                 {
-                    continue;
-                }
+                    var newName = ReplaceFilename(file.FileName, drawablePattern, $"{collectionPair.Target}^{prefix}_{mapping.NewPropIndex:000}${{suffix}}")
+                        ?? ReplaceFilename(file.FileName, texturePattern, $"{collectionPair.Target}^{prefix}_diff_{mapping.NewPropIndex:000}${{suffix}}");
 
-                usedSources.Add(file.FullPath);
-                renames.Add(new StreamRename(
-                    file.FullPath,
-                    Path.Combine(Path.GetDirectoryName(file.FullPath)!, newName),
-                    file.ResourceName,
-                    $"prop anchor {mapping.AnchorId} drawable {mapping.OldPropIndex} -> {mapping.NewPropIndex}",
-                    null,
-                    null,
-                    true));
+                    if (newName is null)
+                    {
+                        continue;
+                    }
+
+                    usedSources.Add(file.FullPath);
+                    renames.Add(new StreamRename(
+                        file.FullPath,
+                        Path.Combine(Path.GetDirectoryName(file.FullPath)!, newName),
+                        file.ResourceName,
+                        $"prop anchor {mapping.AnchorId} drawable {mapping.OldPropIndex} -> {mapping.NewPropIndex}",
+                        null,
+                        null,
+                        true));
+                }
             }
         }
 
@@ -109,4 +112,23 @@ public sealed class StreamRenamePlanner
 
         return pattern.Replace(fileName, replacement);
     }
+
+    private static IReadOnlyList<(string Source, string Target)> BuildPropCollectionPairs(PropMapping mapping)
+    {
+        var pairs = new List<(string Source, string Target)>
+        {
+            (mapping.SourceFullCollection, mapping.TargetFullCollection),
+            (BuildPropFullCollection(mapping.PedBaseName, mapping.SourceCollection), BuildPropFullCollection(mapping.PedBaseName, mapping.TargetCollection)),
+        };
+
+        return pairs
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Source) && !string.IsNullOrWhiteSpace(pair.Target))
+            .Distinct()
+            .ToList();
+    }
+
+    private static string BuildPropFullCollection(string pedBaseName, string collectionName)
+        => string.IsNullOrWhiteSpace(collectionName)
+            ? $"{pedBaseName}_p"
+            : $"{pedBaseName}_p_{collectionName}";
 }
