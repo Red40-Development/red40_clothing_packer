@@ -14,11 +14,23 @@ It supports:
 # [**Red40 Development**](https://red40.dev/scripts)
 Like this tool and want to support further development? Checkout our store [Red40 Development](https://red40.dev/scripts)
 
+## New GUI now available
+
+- Download the [release version](https://github.com/Red40-Development/red40_clothing_packer/releases/latest) approriate for your architecture (Windows/Linux x86-64 builds)
+
+- Launch and follow the steps in the help button
+
+![Preview 1](.github/assets/red40_clothing_packer_1.png)
+
+![Preview 2](.github/assets/red40_clothing_packer_2.png)
+
+## CLI directions
+
 ## Download and Install
 
 ### Option 1: Download built binaries
 
-Download the [release version](https://github.com/Red40-Development/red40_clothing_packer) approriate for your architecture (Windows/Linux x86-64 builds)
+Download the [release version](https://github.com/Red40-Development/red40_clothing_packer/releases/latest) approriate for your architecture (Windows/Linux x86-64 builds)
 
 Copy the executable to your clothing folder
 
