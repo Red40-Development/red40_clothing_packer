@@ -94,6 +94,27 @@ public class GuiWorkflowTests
     }
 
     [Fact]
+    public async Task BuildFailureLogsActivePathAndFullExceptionDetails()
+    {
+        var root = CreateTempDirectory("gui-build-failure");
+        var workflow = new FakeWorkflow
+        {
+            AnalyzeResult = BuildAnalyzeResult(errorCount: 0, warningCount: 0),
+            BuildException = new InvalidOperationException("Context around build failure", new OverflowException("Value was either too large or too small for an Int32.")),
+        };
+        var vm = CreateViewModel(workflow);
+        vm.SelectResourcesFolder(root);
+
+        await vm.AnalyzeAsync();
+        await vm.BuildPreviewAsync();
+
+        Assert.Contains("Context around build failure", vm.Status);
+        Assert.Contains(vm.LogLines, line => line.Contains("Active path when the error occurred", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(vm.LogLines, line => line.Contains("System.InvalidOperationException", StringComparison.Ordinal));
+        Assert.Contains(vm.LogLines, line => line.Contains("System.OverflowException", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CopyBeforeRenameOptionFlowsThroughAnalyzeAndApply()
     {
         var root = CreateTempDirectory("gui-copy-before-rename");
@@ -465,6 +486,7 @@ public class GuiWorkflowTests
         public bool BlockExportUntilCanceled { get; init; }
         public AnalyzeResult AnalyzeResult { get; init; } = BuildAnalyzeResult(errorCount: 0, warningCount: 0);
         public BuildResult BuildResult { get; init; } = new(Path.GetTempPath(), []);
+        public Exception? BuildException { get; init; }
         public RestoreManifestPreview RestorePreview { get; init; } = new(string.Empty, [], [], []);
 
         public async Task<ExportXmlResult> ExportXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
@@ -495,10 +517,17 @@ public class GuiWorkflowTests
         public Task SavePlanAsync(MergePlan plan, string outputPath, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
-        public Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
+        public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         {
             BuildOptions = options;
-            return Task.FromResult(BuildResult);
+            progress.Report(new OperationProgress("build", "build-target", 1, 1, Path.Combine(outputRoot, "broken.ymt"), "Building target collection broken."));
+            await Task.Yield();
+            if (BuildException is not null)
+            {
+                throw BuildException;
+            }
+
+            return BuildResult;
         }
 
         public Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, ApplyOptions options, IProgress<OperationProgress> progress, CancellationToken cancellationToken)

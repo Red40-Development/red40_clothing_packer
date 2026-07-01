@@ -836,7 +836,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             Status = ex.Message;
             Errors.Add(ex.Message);
-            LogLines.Add($"Error: {ex.Message}");
+            if (!string.IsNullOrWhiteSpace(ActivePath))
+            {
+                LogLines.Add($"Active path when the error occurred: {ActivePath}");
+            }
+
+            LogLines.Add($"Error: {ex}");
         }
         finally
         {
@@ -870,6 +875,9 @@ public sealed class MainWindowViewModel : ViewModelBase
             "start" => progress.Message ?? $"{progress.Operation} started.",
             "scan-resource" => progress.Message ?? $"Scanned {progress.Current}/{progress.Total} resources{path}",
             "process-source" => $"Analyzed {progress.Current}/{progress.Total} | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
+            "load-source" => progress.Message ?? $"Loading source YMT {progress.Current}/{progress.Total}{path}",
+            "build-target" => progress.Message ?? $"Building target collection {progress.Current}/{progress.Total}{path}",
+            "build-creature-metadata" => progress.Message ?? $"Building creature metadata {progress.Current}/{progress.Total}{path}",
             "write-target" => $"Built {progress.Current}/{progress.Total} target collections | files {progress.WrittenFileCount}{path}",
             "export-file" => $"Exported {progress.Current}/{progress.Total} | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
             "copy-source-resource" => $"Copied {progress.Current}/{progress.Total} source resources{path}",

@@ -367,34 +367,57 @@ public sealed class RepackerService
         for (var index = 0; index < plan.TargetCollections.Count; index++)
         {
             var targetPlan = plan.TargetCollections[index];
-            var builder = new OutputCollectionBuilder(targetPlan.CollectionName, targetPlan.FullCollectionName, InferPedBaseName(targetPlan.FullCollectionName), targetPlan.Gender);
-            foreach (var sourcePath in targetPlan.SourceYmts)
-            {
-                var source = sources[sourcePath];
-                builder.AddComponents(source, GetComponentRanges(targetPlan, source));
-                builder.AddProps(source, GetPropRanges(targetPlan, source));
-            }
-
-            var xml = builder.BuildXml();
             var relativeYmtPath = targetPlan.OutputYmtPath.Replace('/', Path.DirectorySeparatorChar);
             var ymtOutputPath = Path.Combine(fullOutputRoot, relativeYmtPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(ymtOutputPath)!);
-            await _codec.EncodeFromXmlAsync(xml, ymtOutputPath, cancellationToken);
-            writtenFiles.Add(ymtOutputPath);
+            progress?.Report(new OperationProgress(
+                "build",
+                "build-target",
+                index + 1,
+                plan.TargetCollections.Count,
+                ymtOutputPath,
+                $"Building target collection {targetPlan.FullCollectionName}.",
+                SourceCount: sources.Count,
+                TargetCount: index));
 
-            if (options.IncludeYmtXml)
+            try
             {
-                var previewXmlPath = ymtOutputPath + ".xml";
-                xml.Save(previewXmlPath);
-                writtenFiles.Add(previewXmlPath);
+                var builder = new OutputCollectionBuilder(targetPlan.CollectionName, targetPlan.FullCollectionName, InferPedBaseName(targetPlan.FullCollectionName), targetPlan.Gender);
+                foreach (var sourcePath in targetPlan.SourceYmts)
+                {
+                    var source = sources[sourcePath];
+                    builder.AddComponents(source, GetComponentRanges(targetPlan, source));
+                    builder.AddProps(source, GetPropRanges(targetPlan, source));
+                }
+
+                var xml = builder.BuildXml();
+                Directory.CreateDirectory(Path.GetDirectoryName(ymtOutputPath)!);
+                await EncodeYmtWithDiagnosticsAsync(
+                    xml,
+                    ymtOutputPath,
+                    $"Failed to encode target collection '{targetPlan.FullCollectionName}'",
+                    cancellationToken);
+                writtenFiles.Add(ymtOutputPath);
+
+                if (options.IncludeYmtXml)
+                {
+                    var previewXmlPath = ymtOutputPath + ".xml";
+                    xml.Save(previewXmlPath);
+                    writtenFiles.Add(previewXmlPath);
+                }
+
+                creatureMetadataOutputByTarget.TryGetValue(targetPlan.CollectionName, out var creatureMetadataOutput);
+
+                var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
+                Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
+                BuildShopMeta(targetPlan, xml, creatureMetadataOutput?.Name).Save(metaPath);
+                writtenFiles.Add(metaPath);
             }
-
-            creatureMetadataOutputByTarget.TryGetValue(targetPlan.CollectionName, out var creatureMetadataOutput);
-
-            var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
-            Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-            BuildShopMeta(targetPlan, xml, creatureMetadataOutput?.Name).Save(metaPath);
-            writtenFiles.Add(metaPath);
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException(
+                    $"Failed while building target collection '{targetPlan.FullCollectionName}' for output '{ymtOutputPath}'",
+                    ex);
+            }
 
             progress?.Report(new OperationProgress(
                 "build",
@@ -411,41 +434,74 @@ public sealed class RepackerService
         for (var index = 0; index < creatureMetadataOutputs.Count; index++)
         {
             var creatureMetadataOutput = creatureMetadataOutputs[index];
-            var creatureMetadataXml = BuildCreatureMetadataXml(plan, creatureMetadataOutput, targetPlansByCollection, sources, creatureMetadataByPath);
             var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, creatureMetadataOutput.OutputYmtPath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
-            await _codec.EncodeFromXmlAsync(creatureMetadataXml, creatureMetadataOutputPath, cancellationToken);
-            writtenFiles.Add(creatureMetadataOutputPath);
+            progress?.Report(new OperationProgress(
+                "build",
+                "build-creature-metadata",
+                index + 1,
+                creatureMetadataOutputs.Count,
+                creatureMetadataOutputPath,
+                $"Building creature metadata {creatureMetadataOutput.Name}.",
+                SourceCount: sources.Count,
+                TargetCount: plan.TargetCollections.Count,
+                WrittenFileCount: writtenFiles.Count));
 
-            if (options.IncludeYmtXml)
+            try
             {
-                var previewXmlPath = creatureMetadataOutputPath + ".xml";
-                creatureMetadataXml.Save(previewXmlPath);
-                writtenFiles.Add(previewXmlPath);
+                var creatureMetadataXml = BuildCreatureMetadataXml(plan, creatureMetadataOutput, targetPlansByCollection, sources, creatureMetadataByPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
+                await EncodeYmtWithDiagnosticsAsync(
+                    creatureMetadataXml,
+                    creatureMetadataOutputPath,
+                    $"Failed to encode creature metadata '{creatureMetadataOutput.Name}'",
+                    cancellationToken);
+                writtenFiles.Add(creatureMetadataOutputPath);
+
+                if (options.IncludeYmtXml)
+                {
+                    var previewXmlPath = creatureMetadataOutputPath + ".xml";
+                    creatureMetadataXml.Save(previewXmlPath);
+                    writtenFiles.Add(previewXmlPath);
+                }
+            }
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException(
+                    $"Failed while building creature metadata '{creatureMetadataOutput.Name}' for output '{creatureMetadataOutputPath}'",
+                    ex);
             }
         }
 
         foreach (var alternateMetadataOutput in plan.AlternateMetadataOutputs)
         {
-            var alternateXmls = alternateMetadataOutput.SourcePaths
-                .Where(alternateMetadataByPath.ContainsKey)
-                .Select(path => alternateMetadataByPath[path])
-                .ToList();
-            var xml = alternateMetadataOutput.Kind switch
-            {
-                AlternateVariationsKind => _alternateMetadataBuilder.BuildAlternateVariationsXml(alternateXmls, plan.DrawableMappings),
-                FirstPersonAlternatesKind => _alternateMetadataBuilder.BuildFirstPersonAlternatesXml(alternateXmls, plan.DrawableMappings),
-                _ => null,
-            };
-            if (xml is null)
-            {
-                continue;
-            }
-
             var outputPath = Path.Combine(fullOutputRoot, alternateMetadataOutput.OutputPath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            xml.Save(outputPath);
-            writtenFiles.Add(outputPath);
+            try
+            {
+                var alternateXmls = alternateMetadataOutput.SourcePaths
+                    .Where(alternateMetadataByPath.ContainsKey)
+                    .Select(path => alternateMetadataByPath[path])
+                    .ToList();
+                var xml = alternateMetadataOutput.Kind switch
+                {
+                    AlternateVariationsKind => _alternateMetadataBuilder.BuildAlternateVariationsXml(alternateXmls, plan.DrawableMappings),
+                    FirstPersonAlternatesKind => _alternateMetadataBuilder.BuildFirstPersonAlternatesXml(alternateXmls, plan.DrawableMappings),
+                    _ => null,
+                };
+                if (xml is null)
+                {
+                    continue;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+                xml.Save(outputPath);
+                writtenFiles.Add(outputPath);
+            }
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException(
+                    $"Failed while building alternate metadata '{alternateMetadataOutput.Kind}' for output '{outputPath}'",
+                    ex);
+            }
         }
 
         if (plan.TargetCollections.Count > 0)
@@ -493,6 +549,50 @@ public sealed class RepackerService
 
         return new BuildResult(fullOutputRoot, writtenFiles);
     }
+
+    private async Task EncodeYmtWithDiagnosticsAsync(XDocument xml, string outputYmtPath, string context, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _codec.EncodeFromXmlAsync(xml, outputYmtPath, cancellationToken);
+        }
+        catch (Exception ex) when (IsContextWrappable(ex))
+        {
+            var diagnosticXmlPath = TrySaveFailedXml(xml, outputYmtPath);
+            var diagnosticMessage = diagnosticXmlPath is null
+                ? string.Empty
+                : $" Diagnostic XML was written to '{diagnosticXmlPath}'.";
+
+            throw CreateContextException($"{context}. Output YMT: '{outputYmtPath}'.{diagnosticMessage}", ex);
+        }
+    }
+
+    private static string? TrySaveFailedXml(XDocument xml, string outputYmtPath)
+    {
+        try
+        {
+            var diagnosticXmlPath = outputYmtPath + ".failed.xml";
+            Directory.CreateDirectory(Path.GetDirectoryName(diagnosticXmlPath)!);
+            xml.Save(diagnosticXmlPath);
+            return diagnosticXmlPath;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static WorkflowContextException CreateContextException(string context, Exception innerException)
+    {
+        var message = innerException is OverflowException
+            ? $"{context}: a numeric value could not fit in a signed 32-bit integer. Check the source XML or failed XML preview for values outside -2147483648..2147483647 in signed integer fields. Original error: {innerException.Message}"
+            : $"{context}: {innerException.Message}";
+
+        return new WorkflowContextException(message, innerException);
+    }
+
+    private static bool IsContextWrappable(Exception ex)
+        => ex is not OperationCanceledException && ex is not WorkflowContextException;
 
     public async Task<ExportXmlResult> ExportYmtsToXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -1094,16 +1194,24 @@ public sealed class RepackerService
         for (var index = 0; index < plan.SourceYmts.Count; index++)
         {
             var source = plan.SourceYmts[index];
-            var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
-            result[source.Path] = _reader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
-
             progress?.Report(new OperationProgress(
                 "build",
                 "load-source",
                 index + 1,
                 plan.SourceYmts.Count,
                 source.Path,
-                SourceCount: index + 1));
+                $"Loading source YMT {source.Path}.",
+                SourceCount: index));
+
+            try
+            {
+                var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
+                result[source.Path] = _reader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
+            }
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException($"Failed to load source YMT '{source.Path}' for build", ex);
+            }
         }
 
         return result;
@@ -1114,9 +1222,16 @@ public sealed class RepackerService
         var result = new Dictionary<string, SourceCreatureMetadata>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in plan.SourceCreatureMetadata)
         {
-            var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
-            var metadata = _creatureMetadataReader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
-            result[metadata.Path] = metadata;
+            try
+            {
+                var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
+                var metadata = _creatureMetadataReader.Read(xml, source.Path, source.Resource, Path.GetDirectoryName(source.Path) ?? source.Resource);
+                result[metadata.Path] = metadata;
+            }
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException($"Failed to load creature metadata '{source.Path}' for build", ex);
+            }
         }
 
         return result;
@@ -1128,7 +1243,14 @@ public sealed class RepackerService
         foreach (var source in plan.SourceAlternateMetadata)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            result[source.Path] = XDocument.Load(source.Path, LoadOptions.PreserveWhitespace);
+            try
+            {
+                result[source.Path] = XDocument.Load(source.Path, LoadOptions.PreserveWhitespace);
+            }
+            catch (Exception ex) when (IsContextWrappable(ex))
+            {
+                throw CreateContextException($"Failed to load alternate metadata '{source.Path}' for build", ex);
+            }
         }
 
         await Task.CompletedTask;
@@ -2024,6 +2146,14 @@ end, false)
     }
 
     private sealed record ResourceRootMapping(string SourceRoot, string DestinationRoot);
+
+    private sealed class WorkflowContextException : InvalidOperationException
+    {
+        public WorkflowContextException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
 
     private enum GeneratedResourcesRootUsage
     {
