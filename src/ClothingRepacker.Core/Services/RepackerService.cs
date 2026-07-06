@@ -354,6 +354,7 @@ public sealed class RepackerService
         var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
         var creatureMetadataByPath = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
         var alternateMetadataByPath = await ReloadAlternateMetadataForPlanAsync(plan, cancellationToken);
+        var sourceShopMetadata = LoadSourceShopMetadataIndex(plan, cancellationToken);
         var creatureMetadataOutputs = GetCreatureMetadataOutputPlans(plan);
         var creatureMetadataOutputByTarget = creatureMetadataOutputs
             .SelectMany(output => output.TargetCollections.Select(collection => new { collection, output }))
@@ -413,7 +414,7 @@ public sealed class RepackerService
 
                 var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
                 Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-                BuildShopMeta(targetPlan, xml, creatureMetadataOutput?.Name).Save(metaPath);
+                BuildShopMeta(targetPlan, xml, sourceShopMetadata, plan.DrawableMappings, plan.PropMappings, creatureMetadataOutput?.Name).Save(metaPath);
                 writtenFiles.Add(metaPath);
             }
             catch (Exception ex) when (IsContextWrappable(ex))
@@ -1827,6 +1828,79 @@ public sealed class RepackerService
         string Kind,
         XDocument Xml);
 
+    private sealed class SourceShopMetadataIndex
+    {
+        private readonly Dictionary<SourceShopKey, SourceShopEntry> _components = [];
+        private readonly Dictionary<SourceShopKey, SourceShopEntry> _props = [];
+
+        public void Add(string resourceName, string path)
+        {
+            try
+            {
+                var xml = XDocument.Load(path);
+                if (xml.Root?.Name.LocalName != "ShopPedApparel")
+                {
+                    return;
+                }
+
+                var fullDlcName = xml.Root.Element("fullDlcName")?.Value.Trim();
+                if (string.IsNullOrWhiteSpace(fullDlcName))
+                {
+                    fullDlcName = xml.Root.Element("dlcName")?.Value.Trim();
+                }
+
+                if (string.IsNullOrWhiteSpace(fullDlcName))
+                {
+                    return;
+                }
+
+                foreach (var item in xml.Root.Element("pedComponents")?.Elements("Item") ?? [])
+                {
+                    if (!TryReadComponentShopKey(item, out var componentId, out var drawableIndex, out var textureIndex))
+                    {
+                        continue;
+                    }
+
+                    _components.TryAdd(
+                        CreateSourceShopKey(resourceName, fullDlcName, componentId, drawableIndex, textureIndex),
+                        new SourceShopEntry(item));
+                }
+
+                foreach (var item in xml.Root.Element("pedProps")?.Elements("Item") ?? [])
+                {
+                    if (!TryReadPropShopKey(item, out var anchorId, out var propIndex, out var textureIndex))
+                    {
+                        continue;
+                    }
+
+                    _props.TryAdd(
+                        CreateSourceShopKey(resourceName, fullDlcName, anchorId, propIndex, textureIndex),
+                        new SourceShopEntry(item));
+                }
+            }
+            catch
+            {
+                // Source resources often contain loose meta files with non-XML content; ignore anything that does not parse as ShopPedApparel.
+            }
+        }
+
+        public bool TryGetComponent(string resourceName, string fullDlcName, int componentId, int drawableIndex, int textureIndex, out SourceShopEntry entry)
+            => _components.TryGetValue(CreateSourceShopKey(resourceName, fullDlcName, componentId, drawableIndex, textureIndex), out entry!);
+
+        public bool TryGetProp(string resourceName, string fullDlcName, int anchorId, int propIndex, int textureIndex, out SourceShopEntry entry)
+            => _props.TryGetValue(CreateSourceShopKey(resourceName, fullDlcName, anchorId, propIndex, textureIndex), out entry!);
+    }
+
+    private sealed record SourceShopKey(string ResourceName, string FullDlcName, int SlotId, int LocalIndex, int TextureIndex);
+
+    private sealed record SourceShopEntry(XElement Item);
+
+    private enum SourceShopItemKind
+    {
+        Component,
+        Prop,
+    }
+
     private static string NormalizeCreatureMetadataName(string value)
     {
         var name = Path.GetFileName(value.Trim().Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar));
@@ -1934,7 +2008,44 @@ public sealed class RepackerService
         }
     }
 
-    private static XDocument BuildShopMeta(TargetCollectionPlan plan, XDocument pedVariationXml, string? creatureMetadataName = null)
+    private static SourceShopMetadataIndex LoadSourceShopMetadataIndex(MergePlan plan, CancellationToken cancellationToken)
+    {
+        var index = new SourceShopMetadataIndex();
+        var sourceResources = plan.SourceYmts
+            .Select(source => source.Resource)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var resourceRoots = GetKnownResourceRoots(plan)
+            .Where(Directory.Exists)
+            .ToList();
+        if (resourceRoots.Count == 0)
+        {
+            return index;
+        }
+
+        foreach (var resource in new ResourceScanner().ScanResourceFolders(resourceRoots, cancellationToken: cancellationToken))
+        {
+            if (!sourceResources.Contains(resource.ResourceName))
+            {
+                continue;
+            }
+
+            foreach (var path in resource.ShopMetaFiles)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                index.Add(resource.ResourceName, path);
+            }
+        }
+
+        return index;
+    }
+
+    private static XDocument BuildShopMeta(
+        TargetCollectionPlan plan,
+        XDocument pedVariationXml,
+        SourceShopMetadataIndex sourceShopMetadata,
+        IReadOnlyList<DrawableMapping> drawableMappings,
+        IReadOnlyList<PropMapping> propMappings,
+        string? creatureMetadataName = null)
         => new(
             new XDeclaration("1.0", "utf-8", null),
             new XElement("ShopPedApparel",
@@ -1944,10 +2055,14 @@ public sealed class RepackerService
                 new XElement("eCharacter", GetCharacterName(plan.Gender)),
                 string.IsNullOrWhiteSpace(creatureMetadataName) ? null : new XElement("creatureMetaData", creatureMetadataName),
                 new XElement("pedOutfits", new XAttribute("itemType", "ShopPedOutfit")),
-                new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml)),
-                new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml))));
+                new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml, sourceShopMetadata, drawableMappings)),
+                new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml, sourceShopMetadata, propMappings))));
 
-    private static IEnumerable<XElement> BuildShopComponentItems(TargetCollectionPlan plan, XDocument pedVariationXml)
+    private static IEnumerable<XElement> BuildShopComponentItems(
+        TargetCollectionPlan plan,
+        XDocument pedVariationXml,
+        SourceShopMetadataIndex sourceShopMetadata,
+        IReadOnlyList<DrawableMapping> drawableMappings)
     {
         var root = pedVariationXml.Root;
         if (root is null)
@@ -1955,6 +2070,11 @@ public sealed class RepackerService
             yield break;
         }
 
+        var mappingsByTargetDrawable = drawableMappings
+            .Where(mapping => mapping.TargetFullCollection.Equals(plan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                mapping => (mapping.ComponentId, mapping.NewDrawableIndex),
+                mapping => mapping);
         var availComp = XmlHelpers.ParseIntList(root.Element("availComp")?.Value ?? string.Empty);
         var componentData = XmlHelpers.Items(root.Element("aComponentData3"));
         for (var componentId = 0; componentId < Math.Min(availComp.Length, ClothingConstants.ComponentSlotCount); componentId++)
@@ -1973,21 +2093,30 @@ public sealed class RepackerService
                 var textureCount = Math.Max(1, XmlHelpers.Items(drawables[drawableIndex].Element("aTexData")).Count);
                 for (var textureIndex = 0; textureIndex < textureCount; textureIndex++)
                 {
+                    if (!mappingsByTargetDrawable.TryGetValue((componentId, drawableIndex), out var mapping)
+                        || !sourceShopMetadata.TryGetComponent(mapping.SourceResource, mapping.SourceFullCollection, componentId, mapping.OldDrawableIndex, textureIndex, out var sourceEntry))
+                    {
+                        continue;
+                    }
+
                     var prefix = ClothingConstants.ComponentPrefixes.GetValueOrDefault(componentId, $"comp_{componentId}");
                     var uniqueName = $"{plan.FullCollectionName}_{prefix}_{drawableIndex:000}_{textureIndex:00}";
-                    yield return BuildBaseShopItem(uniqueName, "CLO_SHOP_NONE",
-                        new XElement("componentId", new XAttribute("value", componentId)),
-                        new XElement("drawableId", new XAttribute("value", drawableIndex)),
-                        new XElement("textureId", new XAttribute("value", textureIndex)),
-                        new XElement("compDrawableId", new XAttribute("value", drawableIndex)),
-                        new XElement("compTexId", new XAttribute("value", textureIndex)),
+                    yield return BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Component,
+                        new XElement("drawableIndex", new XAttribute("value", 0)),
+                        new XElement("localDrawableIndex", new XAttribute("value", drawableIndex)),
+                        new XElement("eCompType", ClothingConstants.ComponentTypeNames.GetValueOrDefault(componentId, $"PV_COMP_{componentId}")),
+                        new XElement("textureIndex", new XAttribute("value", textureIndex)),
                         new XElement("isInOutfit", new XAttribute("value", "false")));
                 }
             }
         }
     }
 
-    private static IEnumerable<XElement> BuildShopPropItems(TargetCollectionPlan plan, XDocument pedVariationXml)
+    private static IEnumerable<XElement> BuildShopPropItems(
+        TargetCollectionPlan plan,
+        XDocument pedVariationXml,
+        SourceShopMetadataIndex sourceShopMetadata,
+        IReadOnlyList<PropMapping> propMappings)
     {
         var root = pedVariationXml.Root;
         if (root is null)
@@ -1995,6 +2124,11 @@ public sealed class RepackerService
             yield break;
         }
 
+        var mappingsByTargetProp = propMappings
+            .Where(mapping => mapping.TargetFullCollection.Equals(plan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(
+                mapping => (mapping.AnchorId, mapping.NewPropIndex),
+                mapping => mapping);
         var propMetadata = XmlHelpers.Items(root.Element("propInfo")?.Element("aPropMetaData"))
             .Select(item => new
             {
@@ -2013,26 +2147,109 @@ public sealed class RepackerService
             {
                 var prefix = ClothingConstants.PropPrefixes.GetValueOrDefault(prop.AnchorId, $"prop_{prop.AnchorId}");
                 var uniqueName = $"{plan.FullCollectionName}_{prefix}_{prop.PropId:000}_{textureIndex:00}";
-                yield return BuildBaseShopItem(uniqueName, "CLO_SHOP_NONE",
-                    new XElement("anchorId", new XAttribute("value", prop.AnchorId)),
-                    new XElement("propId", new XAttribute("value", prop.PropId)),
-                    new XElement("textureId", new XAttribute("value", textureIndex)),
-                    new XElement("propAnchorId", new XAttribute("value", prop.AnchorId)),
-                    new XElement("propDrawableId", new XAttribute("value", prop.PropId)),
-                    new XElement("propTexId", new XAttribute("value", textureIndex)),
+                if (!mappingsByTargetProp.TryGetValue((prop.AnchorId, prop.PropId), out var mapping)
+                    || !sourceShopMetadata.TryGetProp(mapping.SourceResource, mapping.SourceFullCollection, prop.AnchorId, mapping.OldPropIndex, textureIndex, out var sourceEntry))
+                {
+                    continue;
+                }
+
+                yield return BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Prop,
+                    new XElement("propIndex", new XAttribute("value", 0)),
+                    new XElement("localPropIndex", new XAttribute("value", prop.PropId)),
+                    new XElement("eAnchorPoint", ClothingConstants.AnchorNames.GetValueOrDefault(prop.AnchorId, $"ANCHOR_{prop.AnchorId}")),
+                    new XElement("textureIndex", new XAttribute("value", textureIndex)),
                     new XElement("isInOutfit", new XAttribute("value", "false")));
             }
         }
     }
 
-    private static XElement BuildBaseShopItem(string uniqueName, string shop, params object[] fields)
+    private static XElement BuildBaseShopItem(string uniqueName, SourceShopEntry sourceEntry, SourceShopItemKind kind, params object[] fields)
         => new("Item",
-            new XElement("lockHash", 0),
-            new XElement("cost", new XAttribute("value", 0)),
-            new XElement("textLabel", uniqueName),
+            new XElement("lockHash"),
+            CloneOrDefault(sourceEntry.Item, "cost", new XElement("cost", new XAttribute("value", 0))),
+            new XElement("textLabel"),
             new XElement("uniqueNameHash", uniqueName),
-            new XElement("eShopEnum", shop),
+            CloneOrDefault(sourceEntry.Item, "eShopEnum", new XElement("eShopEnum", "CLO_SHOP_NONE")),
+            CloneOrDefault(sourceEntry.Item, "locate", new XElement("locate", new XAttribute("value", -99))),
+            CloneOrDefault(sourceEntry.Item, "scriptSaveData", new XElement("scriptSaveData", new XAttribute("value", 0))),
+            CloneOrDefault(sourceEntry.Item, "restrictionTags", new XElement("restrictionTags")),
+            CloneOrDefault(sourceEntry.Item, "forcedComponents", new XElement("forcedComponents")),
+            kind == SourceShopItemKind.Prop
+                ? CloneOrDefault(sourceEntry.Item, "forcedProps", new XElement("forcedProps"))
+                : null,
+            CloneOrDefault(sourceEntry.Item, "variantComponents", new XElement("variantComponents")),
+            kind == SourceShopItemKind.Prop
+                ? CloneOrDefault(sourceEntry.Item, "variantProps", new XElement("variantProps"))
+                : null,
             fields);
+
+    private static XElement CloneOrDefault(XElement sourceItem, string name, XElement fallback)
+        => sourceItem.Element(name) is { } element
+            ? new XElement(element)
+            : fallback;
+
+    private static SourceShopKey CreateSourceShopKey(string resourceName, string fullDlcName, int slotId, int localIndex, int textureIndex)
+        => new(
+            resourceName.ToUpperInvariant(),
+            fullDlcName.ToUpperInvariant(),
+            slotId,
+            localIndex,
+            textureIndex);
+
+    private static bool TryReadComponentShopKey(XElement item, out int componentId, out int drawableIndex, out int textureIndex)
+    {
+        componentId = -1;
+        drawableIndex = -1;
+        textureIndex = -1;
+
+        var compType = item.Element("eCompType")?.Value.Trim();
+        if (!string.IsNullOrWhiteSpace(compType))
+        {
+            componentId = ClothingConstants.ComponentTypeNames
+                .Where(pair => pair.Value.Equals(compType, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => (int?)pair.Key)
+                .FirstOrDefault() ?? -1;
+        }
+
+        TryGetShopInt(item, "localDrawableIndex", out drawableIndex);
+        TryGetShopInt(item, "textureIndex", out textureIndex);
+
+        return componentId >= 0 && drawableIndex >= 0 && textureIndex >= 0;
+    }
+
+    private static bool TryReadPropShopKey(XElement item, out int anchorId, out int propIndex, out int textureIndex)
+    {
+        anchorId = -1;
+        propIndex = -1;
+        textureIndex = -1;
+
+        var anchorName = item.Element("eAnchorPoint")?.Value.Trim();
+        if (!string.IsNullOrWhiteSpace(anchorName))
+        {
+            anchorId = ClothingConstants.AnchorNames
+                .Where(pair => pair.Value.Equals(anchorName, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => (int?)pair.Key)
+                .FirstOrDefault() ?? -1;
+        }
+
+        TryGetShopInt(item, "localPropIndex", out propIndex);
+        TryGetShopInt(item, "textureIndex", out textureIndex);
+
+        return anchorId >= 0 && propIndex >= 0 && textureIndex >= 0;
+    }
+
+    private static bool TryGetShopInt(XElement item, string name, out int value)
+    {
+        value = 0;
+        var element = item.Element(name);
+        if (element is null)
+        {
+            return false;
+        }
+
+        var text = element.Attribute("value")?.Value ?? element.Value;
+        return XmlHelpers.TryParseIntValue(text, out value);
+    }
 
     private static bool TryGetElementValue(XElement item, string name, out int value)
     {

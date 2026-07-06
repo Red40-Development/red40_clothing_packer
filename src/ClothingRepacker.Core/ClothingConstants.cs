@@ -26,6 +26,23 @@ public static class ClothingConstants
             [11] = "jbib",
         });
 
+    public static readonly IReadOnlyDictionary<int, string> ComponentTypeNames =
+        new ReadOnlyDictionary<int, string>(new Dictionary<int, string>
+        {
+            [0] = "PV_COMP_HEAD",
+            [1] = "PV_COMP_BERD",
+            [2] = "PV_COMP_HAIR",
+            [3] = "PV_COMP_UPPR",
+            [4] = "PV_COMP_LOWR",
+            [5] = "PV_COMP_HAND",
+            [6] = "PV_COMP_FEET",
+            [7] = "PV_COMP_TEEF",
+            [8] = "PV_COMP_ACCS",
+            [9] = "PV_COMP_TASK",
+            [10] = "PV_COMP_DECL",
+            [11] = "PV_COMP_JBIB",
+        });
+
     public static readonly IReadOnlyDictionary<int, string> PropPrefixes =
         new ReadOnlyDictionary<int, string>(new Dictionary<int, string>
         {
