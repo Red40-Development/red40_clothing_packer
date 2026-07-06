@@ -246,6 +246,35 @@ public class ApplyRestoreTests
     }
 
     [Fact]
+    public async Task ApplyCopyModeOverlaysGeneratedFilesWhenTargetResourceMatchesCopiedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-overlay-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var originalDrawable = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
+        await File.WriteAllTextAsync(originalDrawable, "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "gang_flags", new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "gang_flags");
+        Assert.True(File.Exists(originalDrawable));
+        Assert.False(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt")));
+        Assert.False(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd")));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_merged_f_001^decl_000_u.ydd")));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_merged_f_001.ymt")));
+        Assert.True(File.Exists(Path.Combine(copiedResource, "data", "mp_f_freemode_01_merged_f_001.meta")));
+    }
+
+    [Fact]
     public async Task ApplyCopyModeRejectsOutputThatWouldOverwriteSelectedResource()
     {
         var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-unsafe-output-test-{Guid.NewGuid():N}");

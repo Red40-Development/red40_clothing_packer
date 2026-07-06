@@ -835,7 +835,9 @@ public sealed class RepackerService
         if (plan.TargetCollections.Count > 0)
         {
             var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
-            if (Directory.Exists(generatedRoot))
+            var generatedRootIsCopiedSourceResource = resourceRootsToCopy.Any(resourceRoot =>
+                PathsEqual(GetResourceCopyDestination(resourceRoot, generatedResourcesRoot), generatedRoot));
+            if (Directory.Exists(generatedRoot) && !generatedRootIsCopiedSourceResource)
             {
                 Directory.Delete(generatedRoot, recursive: true);
             }
