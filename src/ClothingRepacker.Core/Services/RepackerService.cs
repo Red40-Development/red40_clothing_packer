@@ -1865,7 +1865,7 @@ public sealed class RepackerService
 
                     _components.TryAdd(
                         CreateSourceShopKey(resourceName, fullDlcName, componentId, drawableIndex, textureIndex),
-                        new SourceShopEntry(item));
+                        new SourceShopEntry(item, FindLeadingComment(item)));
                 }
 
                 foreach (var item in xml.Root.Element("pedProps")?.Elements("Item") ?? [])
@@ -1877,7 +1877,7 @@ public sealed class RepackerService
 
                     _props.TryAdd(
                         CreateSourceShopKey(resourceName, fullDlcName, anchorId, propIndex, textureIndex),
-                        new SourceShopEntry(item));
+                        new SourceShopEntry(item, FindLeadingComment(item)));
                 }
             }
             catch
@@ -1895,7 +1895,7 @@ public sealed class RepackerService
 
     private sealed record SourceShopKey(string ResourceName, string FullDlcName, int SlotId, int LocalIndex, int TextureIndex);
 
-    private sealed record SourceShopEntry(XElement Item);
+    private sealed record SourceShopEntry(XElement Item, string? Comment);
 
     private enum SourceShopItemKind
     {
@@ -2060,7 +2060,7 @@ public sealed class RepackerService
                 new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml, sourceShopMetadata, drawableMappings)),
                 new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml, sourceShopMetadata, propMappings))));
 
-    private static IEnumerable<XElement> BuildShopComponentItems(
+    private static IEnumerable<XNode> BuildShopComponentItems(
         TargetCollectionPlan plan,
         XDocument pedVariationXml,
         SourceShopMetadataIndex sourceShopMetadata,
@@ -2103,18 +2103,21 @@ public sealed class RepackerService
 
                     var prefix = ClothingConstants.ComponentPrefixes.GetValueOrDefault(componentId, $"comp_{componentId}");
                     var uniqueName = $"{plan.FullCollectionName}_{prefix}_{drawableIndex:000}_{textureIndex:00}";
-                    yield return BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Component,
+                    foreach (var node in BuildShopItemNodes(sourceEntry, BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Component,
                         new XElement("drawableIndex", new XAttribute("value", 0)),
                         new XElement("localDrawableIndex", new XAttribute("value", drawableIndex)),
                         new XElement("eCompType", ClothingConstants.ComponentTypeNames.GetValueOrDefault(componentId, $"PV_COMP_{componentId}")),
                         new XElement("textureIndex", new XAttribute("value", textureIndex)),
-                        new XElement("isInOutfit", new XAttribute("value", "false")));
+                        new XElement("isInOutfit", new XAttribute("value", "false")))))
+                    {
+                        yield return node;
+                    }
                 }
             }
         }
     }
 
-    private static IEnumerable<XElement> BuildShopPropItems(
+    private static IEnumerable<XNode> BuildShopPropItems(
         TargetCollectionPlan plan,
         XDocument pedVariationXml,
         SourceShopMetadataIndex sourceShopMetadata,
@@ -2155,14 +2158,27 @@ public sealed class RepackerService
                     continue;
                 }
 
-                yield return BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Prop,
+                foreach (var node in BuildShopItemNodes(sourceEntry, BuildBaseShopItem(uniqueName, sourceEntry, SourceShopItemKind.Prop,
                     new XElement("propIndex", new XAttribute("value", 0)),
                     new XElement("localPropIndex", new XAttribute("value", prop.PropId)),
                     new XElement("eAnchorPoint", ClothingConstants.AnchorNames.GetValueOrDefault(prop.AnchorId, $"ANCHOR_{prop.AnchorId}")),
                     new XElement("textureIndex", new XAttribute("value", textureIndex)),
-                    new XElement("isInOutfit", new XAttribute("value", "false")));
+                    new XElement("isInOutfit", new XAttribute("value", "false")))))
+                {
+                    yield return node;
+                }
             }
         }
+    }
+
+    private static IEnumerable<XNode> BuildShopItemNodes(SourceShopEntry sourceEntry, XElement item)
+    {
+        if (!string.IsNullOrWhiteSpace(sourceEntry.Comment))
+        {
+            yield return new XComment(sourceEntry.Comment);
+        }
+
+        yield return item;
     }
 
     private static XElement BuildBaseShopItem(string uniqueName, SourceShopEntry sourceEntry, SourceShopItemKind kind, params object[] fields)
@@ -2189,6 +2205,26 @@ public sealed class RepackerService
         => sourceItem.Element(name) is { } element
             ? new XElement(element)
             : fallback;
+
+    private static string? FindLeadingComment(XElement item)
+    {
+        for (var node = item.PreviousNode; node is not null; node = node.PreviousNode)
+        {
+            if (node is XComment comment)
+            {
+                return comment.Value;
+            }
+
+            if (node is XText text && string.IsNullOrWhiteSpace(text.Value))
+            {
+                continue;
+            }
+
+            break;
+        }
+
+        return null;
+    }
 
     private static SourceShopKey CreateSourceShopKey(string resourceName, string fullDlcName, int slotId, int localIndex, int textureIndex)
         => new(

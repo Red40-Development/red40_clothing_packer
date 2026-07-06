@@ -59,6 +59,8 @@ public class ShopMetaGenerationTests
         var xml = XDocument.Load(metaPath);
 
         var component = Assert.Single(xml.Root!.Element("pedComponents")!.Elements("Item"));
+        var componentComment = Assert.IsType<XComment>(component.PreviousNode);
+        Assert.Equal("Accessories: Accessories - mp_m_freemode_01_component_pack^teef_diff_000_b_uni", componentComment.Value.Trim());
         Assert.Empty(component.Element("lockHash")!.Value);
         Assert.Empty(component.Element("textLabel")!.Value);
         Assert.Equal("mp_m_freemode_01_merged_m_001_teef_000_01", component.Element("uniqueNameHash")!.Value.Trim());
@@ -96,6 +98,8 @@ public class ShopMetaGenerationTests
 
         Assert.Equal("MP_CreatureMetadata_merged_f_001", xml.Root?.Element("creatureMetaData")?.Value.Trim());
         var prop = Assert.Single(xml.Root!.Element("pedProps")!.Elements("Item"));
+        var propComment = Assert.IsType<XComment>(prop.PreviousNode);
+        Assert.Equal("Props: Glasses - mp_f_freemode_01_prop_pack^p_eyes_diff_000_a", propComment.Value.Trim());
 
         Assert.Empty(prop.Element("lockHash")!.Value);
         Assert.Empty(prop.Element("textLabel")!.Value);
@@ -212,6 +216,7 @@ public class ShopMetaGenerationTests
             new XElement("eCharacter", "SCR_CHAR_MULTIPLAYER"),
             new XElement("pedOutfits"),
             new XElement("pedComponents",
+                new XComment(" Accessories: Accessories - mp_m_freemode_01_component_pack^teef_diff_000_b_uni "),
                 new XElement("Item",
                     new XElement("lockHash"),
                     new XElement("cost", new XAttribute("value", 15)),
@@ -239,6 +244,7 @@ public class ShopMetaGenerationTests
             new XElement("pedOutfits"),
             new XElement("pedComponents"),
             new XElement("pedProps",
+                new XComment(" Props: Glasses - mp_f_freemode_01_prop_pack^p_eyes_diff_000_a "),
                 new XElement("Item",
                     new XElement("lockHash"),
                     new XElement("cost", new XAttribute("value", 0)),
