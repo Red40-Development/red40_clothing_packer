@@ -176,19 +176,22 @@ public sealed class CreatureMetadataBuilder
             if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                 && uint.TryParse(text[2..], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out var hexValue))
             {
-                valueAttribute.Value = hexValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                valueAttribute.Value = FormatHexValue(hexValue);
             }
             else if (uint.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var unsignedValue)
                      && unsignedValue > int.MaxValue)
             {
-                valueAttribute.Value = unsignedValue.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                valueAttribute.Value = FormatHexValue(unsignedValue);
             }
             else if (XmlHelpers.TryParseIntValue(text, out var value))
             {
-                valueAttribute.Value = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                valueAttribute.Value = FormatHexValue(unchecked((uint)value));
             }
         }
     }
+
+    private static string FormatHexValue(uint value)
+        => $"0x{value:X}";
 
     private static XElement BuildHighHeelExpression(int drawableIndex)
         => new("Item",

@@ -4,6 +4,7 @@ using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core.Xml;
+using CodeWalker.GameFiles;
 
 namespace ClothingRepacker.Tests;
 
@@ -79,7 +80,10 @@ public class CreatureMetadataTests
         Assert.Single(analyze.Plan.SourceCreatureMetadata);
         Assert.Single(analyze.Plan.CreatureMetadataOutputs);
         Assert.Equal(2, analyze.Plan.TargetCollections.Count);
-        AssertXmlEqual(expected, XDocument.Load(sharedMetadataPath));
+        var sharedMetadataXml = XDocument.Load(sharedMetadataPath);
+        AssertXmlEqual(expected, sharedMetadataXml);
+        AssertValueAttributesAreHex(sharedMetadataXml);
+        AssertYmtIsRbf(Path.ChangeExtension(sharedMetadataPath, null));
         Assert.Equal("MP_CreatureMetadata_merged_001", XDocument.Load(femaleShopMetaPath).Root?.Element("creatureMetaData")?.Value.Trim());
         Assert.Equal("MP_CreatureMetadata_merged_001", XDocument.Load(maleShopMetaPath).Root?.Element("creatureMetaData")?.Value.Trim());
     }
@@ -178,7 +182,10 @@ public class CreatureMetadataTests
         var expectedPath = TestFixturePaths.Ymt("expected_merged_three_pack_creaturemetadata.ymt.xml");
 
         Assert.Equal(3, analyze.Plan.SourceCreatureMetadata.Count);
-        AssertXmlEqual(XDocument.Load(expectedPath), XDocument.Load(metadataPath));
+        var metadataXml = XDocument.Load(metadataPath);
+        AssertXmlEqual(XDocument.Load(expectedPath), metadataXml);
+        AssertValueAttributesAreHex(metadataXml);
+        AssertYmtIsRbf(Path.ChangeExtension(metadataPath, null));
     }
 
     [Fact]
@@ -212,6 +219,8 @@ public class CreatureMetadataTests
         Assert.Equal([4, 8], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
         Assert.Equal([-1, 0, 1], ReadValues(xml, "pedPropExpressions", "pedPropVarIndex"));
         Assert.Equal([0, 9, 10], ReadValues(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+        AssertValueAttributesAreHex(xml);
+        AssertYmtIsRbf(Path.ChangeExtension(metadataPath, null));
         Assert.Single(xml.Root!.Element("shaderVariableComponents")!.Elements("Item"));
     }
 
@@ -240,6 +249,7 @@ public class CreatureMetadataTests
 
         Assert.Empty(analyze.Plan.SourceCreatureMetadata);
         Assert.Equal("CCreatureMetaData", xml.Root?.Name.LocalName);
+        AssertValueAttributesAreHex(xml);
         Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
         Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
     }
@@ -306,6 +316,7 @@ public class CreatureMetadataTests
         Assert.Empty(analyze.Plan.SourceCreatureMetadata);
         Assert.Equal([0, 1], ReadValues(xml, "pedCompExpressions", "pedCompVarIndex"));
         Assert.Equal([4, 4], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
+        AssertValueAttributesAreHex(xml);
         Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
     }
 
@@ -336,7 +347,8 @@ public class CreatureMetadataTests
         Assert.Empty(analyze.Plan.SourceCreatureMetadata);
         Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
         Assert.Equal([-1, 0, 1], ReadValues(xml, "pedPropExpressions", "pedPropVarIndex"));
-        Assert.Equal(["4294967295", "0", "0"], ReadValueStrings(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+        Assert.Equal(["0xFFFFFFFF", "0x0", "0x0"], ReadValueStrings(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+        AssertValueAttributesAreHex(xml);
     }
 
     [Fact]
@@ -367,6 +379,7 @@ public class CreatureMetadataTests
         Assert.Equal([8], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
         Assert.Equal([-1, 0], ReadValues(xml, "pedPropExpressions", "pedPropVarIndex"));
         Assert.Equal([0, 10], ReadValues(xml, "pedPropExpressions", "pedPropExpressionIndex"));
+        AssertValueAttributesAreHex(xml);
     }
 
     private static void WriteResource(
@@ -488,7 +501,7 @@ public class CreatureMetadataTests
 
     private static int[] ReadValues(XDocument xml, string containerName, string valueElementName)
         => xml.Root!.Element(containerName)!.Elements("Item")
-            .Select(item => int.Parse(item.Element(valueElementName)!.Attribute("value")!.Value))
+            .Select(item => XmlHelpers.ParseIntValue(item.Element(valueElementName)!.Attribute("value")!.Value))
             .ToArray();
 
     private static string[] ReadValueStrings(XDocument xml, string containerName, string valueElementName)
@@ -498,8 +511,39 @@ public class CreatureMetadataTests
 
     private static void AssertXmlEqual(XDocument expected, XDocument actual)
     {
+        var normalizedExpected = NormalizeCreatureMetadataValueAttributes(expected);
+        var normalizedActual = NormalizeCreatureMetadataValueAttributes(actual);
+
         Assert.Equal(
-            expected.ToString(SaveOptions.DisableFormatting),
-            actual.ToString(SaveOptions.DisableFormatting));
+            normalizedExpected.ToString(SaveOptions.DisableFormatting),
+            normalizedActual.ToString(SaveOptions.DisableFormatting));
+    }
+
+    private static XDocument NormalizeCreatureMetadataValueAttributes(XDocument xml)
+    {
+        var clone = new XDocument(xml);
+        foreach (var attribute in clone.Descendants().Attributes("value"))
+        {
+            attribute.Value = XmlHelpers.ParseIntValue(attribute.Value).ToString();
+        }
+
+        return clone;
+    }
+
+    private static void AssertValueAttributesAreHex(XDocument xml)
+    {
+        var nonHexValues = xml.Descendants()
+            .Attributes("value")
+            .Where(attribute => !attribute.Value.Trim().StartsWith("0x", StringComparison.Ordinal))
+            .Select(attribute => $"{attribute.Parent?.Name.LocalName}={attribute.Value}")
+            .ToList();
+
+        Assert.Empty(nonHexValues);
+    }
+
+    private static void AssertYmtIsRbf(string path)
+    {
+        using var stream = File.OpenRead(path);
+        Assert.True(RbfFile.IsRBF(stream));
     }
 }

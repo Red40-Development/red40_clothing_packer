@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ClothingRepacker.CodeWalker;
+using CodeWalker.GameFiles;
 
 namespace ClothingRepacker.Tests;
 
@@ -67,9 +68,35 @@ public class BinaryYmtCodecTests
         Assert.NotNull(xml.Root?.Element("pedCompExpressions"));
     }
 
+    [Fact]
+    public async Task RoundTripsCreatureMetadataThroughRbfEncoder()
+    {
+        var inputPath = Fixture("mp_creaturemetadata.ymt");
+        var tempDir = Path.Combine(Path.GetTempPath(), $"binary-creature-metadata-roundtrip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var xml = await _codec.DecodeToXmlAsync(inputPath);
+        var outputPath = Path.Combine(tempDir, "mp_creaturemetadata.ymt");
+
+        await _codec.EncodeFromXmlAsync(xml, outputPath);
+        var roundTrippedXml = await _codec.DecodeToXmlAsync(outputPath);
+
+        Assert.True(IsRbfFile(outputPath));
+        Assert.Equal("CCreatureMetaData", roundTrippedXml.Root?.Name.LocalName);
+        Assert.NotNull(roundTrippedXml.Root?.Element("shaderVariableComponents"));
+        Assert.NotNull(roundTrippedXml.Root?.Element("pedPropExpressions"));
+        Assert.NotNull(roundTrippedXml.Root?.Element("pedCompExpressions"));
+    }
+
     public static IEnumerable<object[]> GetBinaryFixtures()
         => BinaryFixtures.Select(path => new object[] { path });
 
     private static string Fixture(string fileName)
         => TestFixturePaths.Ymt(fileName);
+
+    private static bool IsRbfFile(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return RbfFile.IsRBF(stream);
+    }
 }
