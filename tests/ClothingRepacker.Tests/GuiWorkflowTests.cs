@@ -44,7 +44,8 @@ public class GuiWorkflowTests
         Assert.Equal([root], workflow.AnalyzeResourceFolders);
         Assert.Equal(outputRoot, workflow.AnalyzeGeneratedResourcesRoot);
         Assert.False(workflow.AnalyzeSettings.RenameStreamsInPlace);
-        Assert.Equal(1, vm.SelectedTabIndex);
+        Assert.False(workflow.AnalyzeSettings.OptimizeYmtUsage);
+        Assert.Equal(2, vm.SelectedTabIndex);
         Assert.Equal(2, vm.Summary.SourceYmtCount);
         Assert.Equal(1, vm.Summary.TargetCollectionCount);
         Assert.Equal(1, vm.Summary.WarningCount);
@@ -160,6 +161,26 @@ public class GuiWorkflowTests
         Assert.True(workflow.ApplyOptions.CopyResourcesToOutputBeforeRename);
         Assert.False(workflow.ApplyOptions.IncludeYmtXml);
         Assert.False(workflow.ApplyOptions.IncludeDebugClient);
+    }
+
+    [Fact]
+    public async Task OptimizeYmtUsageOptionFlowsThroughAnalyzeAndProjectSettings()
+    {
+        var root = CreateTempDirectory("gui-optimize-ymt");
+        var settingsStore = new FakeSettingsStore(projectPath: "/tmp/project.json");
+        var workflow = new FakeWorkflow
+        {
+            AnalyzeResult = BuildAnalyzeResult(errorCount: 0, warningCount: 0),
+        };
+        var vm = new MainWindowViewModel(workflow, settingsStore);
+        await WaitForAsync(() => vm.HasCurrentProject);
+        vm.SelectResourcesFolder(root);
+        vm.OptimizeYmtUsage = true;
+
+        await vm.AnalyzeAsync();
+
+        Assert.True(workflow.AnalyzeSettings.OptimizeYmtUsage);
+        Assert.True(settingsStore.LastSavedProject.OptimizeYmtUsage);
     }
 
     [Fact]

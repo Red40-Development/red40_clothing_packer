@@ -82,6 +82,7 @@ public static class ProgramEntry
             MaxDrawablesPerProp = ParseInt(
                 options.GetValueOrDefault("--max-drawables-per-prop"),
                 legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerProp),
+            OptimizeYmtUsage = options.ContainsKey("--optimize-ymt-usage"),
         };
 
         var result = await AnalyzeWithOptionsAsync(service, options, targetResource, settings, CreateConsoleProgress(progressWriter));
@@ -249,6 +250,7 @@ public static class ProgramEntry
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
 clothing-repacker analyze --resource <path> [--resource <path> ...] --generated-root <folder> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--optimize-ymt-usage]
 clothing-repacker build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
 clothing-repacker apply --plan <plan.json> --backup-root <folder> [--copy-resources-to-output]
@@ -267,6 +269,11 @@ Apply options:
   --copy-resources-to-output
                        Copy source resources into the plan's generated/output root
                        and rename the copies instead of modifying originals.
+
+Analyze options:
+  --optimize-ymt-usage
+                       Split source YMT lanes across target collections when it
+                       can reduce the total number of generated YMTs.
 """);
     }
 

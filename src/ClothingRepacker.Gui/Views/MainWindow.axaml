@@ -102,6 +102,7 @@
               </Grid>
               <CheckBox Content="Save generated plan JSON" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
               <CheckBox Content="Copy source resources to output before renaming" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}" />
+              <CheckBox Content="Optimize YMT usage" IsChecked="{Binding OptimizeYmtUsage, Mode=TwoWay}" />
               <Expander Header="Advanced" HorizontalAlignment="Stretch">
                 <StackPanel Spacing="8" Margin="0,8,0,0">
                   <Button Content="Export XML"

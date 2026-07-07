@@ -202,10 +202,10 @@ public sealed class RepackerService
         {
             var target = targets[index];
             var builder = new OutputCollectionBuilder(target.CollectionName, target.FullCollectionName, target.PedBaseName, target.Gender);
-            foreach (var contribution in target.Contributions)
+            foreach (var source in target.Sources)
             {
-                drawableMappings.AddRange(builder.AddComponents(contribution.Source, contribution.ComponentRanges));
-                propMappings.AddRange(builder.AddProps(contribution.Source, contribution.PropRanges));
+                drawableMappings.AddRange(builder.AddComponents(source, GetComponentRanges(target.Contributions, source)));
+                propMappings.AddRange(builder.AddProps(source, GetPropRanges(target.Contributions, source)));
             }
 
             var outputYmtPath = Path.Combine(targetResource, "stream", $"{target.FullCollectionName}.ymt");
@@ -1315,6 +1315,11 @@ public sealed class RepackerService
     {
         if (targetPlan.ComponentRanges.Count == 0)
         {
+            if (targetPlan.ComponentCounts.Count == 0)
+            {
+                return new Dictionary<int, SourceIndexRange>();
+            }
+
             return source.Components.ToDictionary(
                 component => component.ComponentId,
                 component => new SourceIndexRange(source.YmtPath, component.ComponentId, 0, component.Drawables.Count));
@@ -1329,6 +1334,11 @@ public sealed class RepackerService
     {
         if (targetPlan.PropRanges.Count == 0)
         {
+            if (targetPlan.PropCounts.Count == 0)
+            {
+                return new Dictionary<int, SourceIndexRange>();
+            }
+
             return source.Props.ToDictionary(
                 prop => prop.AnchorId,
                 prop => new SourceIndexRange(source.YmtPath, prop.AnchorId, 0, prop.Props.Count));
@@ -1338,6 +1348,18 @@ public sealed class RepackerService
             .Where(range => range.SourceYmtPath.Equals(source.YmtPath, StringComparison.OrdinalIgnoreCase))
             .ToDictionary(range => range.SlotId, range => range);
     }
+
+    private static IReadOnlyDictionary<int, SourceIndexRange> GetComponentRanges(IEnumerable<SourceYmtContribution> contributions, SourceYmt source)
+        => contributions
+            .Where(contribution => ReferenceEquals(contribution.Source, source))
+            .SelectMany(contribution => contribution.ComponentRanges.Values)
+            .ToDictionary(range => range.SlotId, range => range);
+
+    private static IReadOnlyDictionary<int, SourceIndexRange> GetPropRanges(IEnumerable<SourceYmtContribution> contributions, SourceYmt source)
+        => contributions
+            .Where(contribution => ReferenceEquals(contribution.Source, source))
+            .SelectMany(contribution => contribution.PropRanges.Values)
+            .ToDictionary(range => range.SlotId, range => range);
 
     private static bool TargetHasUnavailableCreatureMetadata(MergePlan plan, TargetCollectionPlan targetPlan)
         => TargetHasUnavailableCreatureMetadata(

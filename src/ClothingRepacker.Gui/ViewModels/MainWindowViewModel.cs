@@ -39,6 +39,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _overwriteXml;
     private bool _savePlan = true;
     private bool _copyResourcesToOutputBeforeRename = true;
+    private bool _optimizeYmtUsage;
     private bool _isBusy;
     private string _status = "Select clothing resource folders to begin.";
     private string _versionCheckText;
@@ -97,6 +98,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     public ObservableCollection<string> Errors { get; } = [];
     public ObservableCollection<string> Files { get; } = [];
     public ObservableCollection<string> LogLines { get; } = [];
+    public ObservableCollection<string> RepackReportLines { get; } = [];
     public ObservableCollection<string> ResourcePaths { get; } = [];
 
     public AppVersion CurrentVersion { get; }
@@ -346,6 +348,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
+    public bool OptimizeYmtUsage
+    {
+        get => _optimizeYmtUsage;
+        set
+        {
+            if (SetProperty(ref _optimizeYmtUsage, value))
+            {
+                ResetPlanState();
+            }
+        }
+    }
+
     public bool IsBusy
     {
         get => _isBusy;
@@ -576,6 +590,7 @@ public sealed class MainWindowViewModel : ViewModelBase
                 MalePrefix = MalePrefix,
                 MaxDrawablesPerComponent = MaxDrawablesPerComponent,
                 MaxDrawablesPerProp = MaxDrawablesPerProp,
+                OptimizeYmtUsage = OptimizeYmtUsage,
                 RenameStreamsInPlace = !CopyResourcesToOutputBeforeRename,
             };
 
@@ -833,7 +848,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             LogLines.Add($"Error: {ex}");
         }
-        finally
+      finally
         {
             _operationCts.Dispose();
             _operationCts = null;
@@ -1165,6 +1180,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             OverwriteXml = OverwriteXml,
             SavePlan = SavePlan,
             CopyResourcesToOutputBeforeRename = CopyResourcesToOutputBeforeRename,
+            OptimizeYmtUsage = OptimizeYmtUsage,
         };
 
     private void ApplyProjectSettings(ProjectSettings settings, string projectPath)
@@ -1188,6 +1204,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         _overwriteXml = settings.OverwriteXml;
         _savePlan = settings.SavePlan;
         _copyResourcesToOutputBeforeRename = settings.CopyResourcesToOutputBeforeRename;
+        _optimizeYmtUsage = settings.OptimizeYmtUsage;
         CurrentProjectPath = projectPath;
         ResetPlanState();
         OnPropertyChanged(string.Empty);

@@ -68,26 +68,72 @@ public class MergeTests
             .Sum(range => range.Count)));
     }
 
+    [Fact]
+    public void OptimizedPlannerCanSplitSourceLanesToReduceTargetCollections()
+    {
+        var planner = new MergePlanner();
+        var settings = new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 10,
+            OptimizeYmtUsage = true,
+        };
+        var sources = new[]
+        {
+            CreateSourceYmt("a_pack", new Dictionary<int, int> { [0] = 6, [1] = 6 }),
+            CreateSourceYmt("b_pack", new Dictionary<int, int> { [0] = 6, [2] = 6 }),
+            CreateSourceYmt("c_pack", new Dictionary<int, int> { [1] = 6, [2] = 6 }),
+        };
+
+        var preservingOutputs = planner.Plan(
+            sources,
+            new MergePlanSettings
+            {
+                MaxDrawablesPerComponent = settings.MaxDrawablesPerComponent,
+            },
+            [],
+            []);
+        var optimizedOutputs = planner.Plan(
+            sources,
+            settings,
+            [],
+            []);
+
+        Assert.Equal(3, preservingOutputs.Count);
+        Assert.Equal(2, optimizedOutputs.Count);
+        Assert.All(optimizedOutputs, output =>
+        {
+            Assert.All(output.ComponentCounts.Values, count => Assert.InRange(count, 0, settings.MaxDrawablesPerComponent));
+        });
+        Assert.Equal(2, optimizedOutputs.Count(output => output.Sources.Contains(sources[1])));
+    }
+
     private static SourceYmt CreateSourceYmt(string pathSuffix, int componentDrawableCount, int propCount)
+        => CreateSourceYmt(
+            pathSuffix,
+            componentDrawableCount > 0
+                ? new Dictionary<int, int> { [0] = componentDrawableCount }
+                : new Dictionary<int, int>(),
+            propCount > 0
+                ? new Dictionary<int, int> { [0] = propCount }
+                : new Dictionary<int, int>());
+
+    private static SourceYmt CreateSourceYmt(string pathSuffix, IReadOnlyDictionary<int, int> componentDrawableCounts, IReadOnlyDictionary<int, int>? propCounts = null)
     {
         var xml = new XDocument(new XElement("CPedVariationInfo"));
-        var components = componentDrawableCount > 0
-            ? new[]
-            {
-                new ComponentBlock(
-                    0,
-                    Enumerable.Range(0, componentDrawableCount).Select(_ => new XElement("Item")).ToList(),
-                    Array.Empty<XElement>())
-            }
-            : Array.Empty<ComponentBlock>();
-        var props = propCount > 0
-            ? new[]
-            {
-                new PropBlock(
-                    0,
-                    Enumerable.Range(0, propCount).Select(_ => new XElement("Item")).ToList())
-            }
-            : Array.Empty<PropBlock>();
+        var components = componentDrawableCounts
+            .OrderBy(pair => pair.Key)
+            .Select(pair => new ComponentBlock(
+                pair.Key,
+                Enumerable.Range(0, pair.Value).Select(_ => new XElement("Item")).ToList(),
+                Array.Empty<XElement>()))
+            .ToList();
+        var props = (propCounts ?? new Dictionary<int, int>())
+            .OrderBy(pair => pair.Key)
+            .Select(pair => new PropBlock(
+                pair.Key,
+                Enumerable.Range(0, pair.Value).Select(index =>
+                    new XElement("Item", new XElement("propId", new XAttribute("value", index)))).ToList()))
+            .ToList();
 
         return new SourceYmt(
             YmtPath: $"/tmp/{pathSuffix}.ymt.xml",

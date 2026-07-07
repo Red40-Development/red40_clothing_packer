@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ClothingRepacker.Core.Models;
 
 namespace ClothingRepacker.Tests;
 
@@ -35,6 +36,7 @@ public class CliResourceOptionTests
             generatedRoot,
             "--target-resource",
             "zz_merged_clothing_meta",
+            "--optimize-ymt-usage",
             "--out",
             planPath,
         ]);
@@ -47,6 +49,7 @@ public class CliResourceOptionTests
         });
         Assert.Equal(Path.GetFullPath(generatedRoot), plan.GetProperty("generatedResourcesRoot").GetString());
         Assert.Equal(2, plan.GetProperty("resourceRoots").GetArrayLength());
+        Assert.True(plan.GetProperty("settings").GetProperty("optimizeYmtUsage").GetBoolean());
     }
 
     [Fact]

@@ -19,4 +19,5 @@ public sealed class ProjectSettings
     public bool OverwriteXml { get; set; }
     public bool SavePlan { get; set; } = true;
     public bool CopyResourcesToOutputBeforeRename { get; set; } = true;
+    public bool OptimizeYmtUsage { get; set; }
 }
