@@ -352,7 +352,7 @@ public sealed class RepackerService
 
         var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
         var creatureMetadataByPath = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
-        var alternateMetadataByPath = await ReloadAlternateMetadataForPlanAsync(plan, cancellationToken);
+        var alternateMetadataByPath = ReloadAlternateMetadataForPlan(plan, cancellationToken);
         var sourceShopMetadata = LoadSourceShopMetadataIndex(plan, cancellationToken);
         var creatureMetadataOutputs = GetCreatureMetadataOutputPlans(plan);
         var creatureMetadataOutputByTarget = creatureMetadataOutputs
@@ -995,7 +995,7 @@ public sealed class RepackerService
         GeneratedResourcesRootUsage usage)
     {
         var fullGeneratedResourcesRoot = Path.GetFullPath(generatedResourcesRoot);
-        if (IsResourceFolder(fullGeneratedResourcesRoot))
+        if (ResourceFolderDiscovery.IsResourceFolder(fullGeneratedResourcesRoot))
         {
             throw new InvalidOperationException($"Output root must be a folder that contains resources, not a resource folder: {fullGeneratedResourcesRoot}");
         }
@@ -1027,10 +1027,6 @@ public sealed class RepackerService
 
     private static string GetResourceCopyDestination(string sourceRoot, string generatedResourcesRoot)
         => Path.Combine(Path.GetFullPath(generatedResourcesRoot), Path.GetFileName(NormalizePath(sourceRoot)));
-
-    private static bool IsResourceFolder(string path)
-        => File.Exists(Path.Combine(path, "fxmanifest.lua"))
-           || File.Exists(Path.Combine(path, "__resource.lua"));
 
     private static bool PathsEqual(string left, string right)
         => NormalizePath(left).Equals(NormalizePath(right), StringComparison.OrdinalIgnoreCase);
@@ -1254,7 +1250,7 @@ public sealed class RepackerService
         return result;
     }
 
-    private static async Task<Dictionary<string, XDocument>> ReloadAlternateMetadataForPlanAsync(MergePlan plan, CancellationToken cancellationToken)
+    private static Dictionary<string, XDocument> ReloadAlternateMetadataForPlan(MergePlan plan, CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, XDocument>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in plan.SourceAlternateMetadata)
@@ -1270,7 +1266,6 @@ public sealed class RepackerService
             }
         }
 
-        await Task.CompletedTask;
         return result;
     }
 

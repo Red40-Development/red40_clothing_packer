@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Reflection;
 using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
+using ClothingRepacker.Core.Scanning;
 using ClothingRepacker.Gui.Models;
 using ClothingRepacker.Gui.Services;
 
@@ -488,75 +489,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     private static IReadOnlyList<string> ExpandResourceFolderSelections(IEnumerable<string> paths)
-    {
-        var resources = new List<string>();
-        foreach (var path in paths.Where(path => !string.IsNullOrWhiteSpace(path)).Select(Path.GetFullPath))
-        {
-            if (!Directory.Exists(path))
-            {
-                continue;
-            }
-
-            if (IsBracketFolder(path))
-            {
-                var resourcesUnderBracketFolder = FindResourceFoldersUnder(path);
-                resources.AddRange(resourcesUnderBracketFolder.Count > 0 ? resourcesUnderBracketFolder : [path]);
-                continue;
-            }
-
-            if (IsResourceFolder(path))
-            {
-                resources.Add(path);
-                continue;
-            }
-
-            var childResources = Directory.GetDirectories(path)
-                .Where(IsResourceFolder)
-                .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            foreach (var bracketFolder in Directory.GetDirectories(path)
-                         .Where(IsBracketFolder)
-                         .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase))
-            {
-                childResources.AddRange(FindResourceFoldersUnder(bracketFolder));
-            }
-
-            resources.AddRange(childResources.Count > 0 ? childResources : [path]);
-        }
-
-        return resources
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static IReadOnlyList<string> FindResourceFoldersUnder(string root)
-    {
-        var resources = new List<string>();
-        foreach (var directory in Directory.GetDirectories(root)
-                     .OrderBy(resourcePath => resourcePath, StringComparer.OrdinalIgnoreCase))
-        {
-            if (IsResourceFolder(directory))
-            {
-                resources.Add(directory);
-                continue;
-            }
-
-            resources.AddRange(FindResourceFoldersUnder(directory));
-        }
-
-        return resources;
-    }
-
-    private static bool IsResourceFolder(string path)
-        => File.Exists(Path.Combine(path, "fxmanifest.lua"))
-           || File.Exists(Path.Combine(path, "__resource.lua"));
-
-    private static bool IsBracketFolder(string path)
-    {
-        var name = Path.GetFileName(path);
-        return name.Contains('[') && name.Contains(']');
-    }
+        => ResourceFolderDiscovery.ExpandSelectedResourceFolders(paths);
 
     public void RemoveSelectedResourceFolder()
     {
