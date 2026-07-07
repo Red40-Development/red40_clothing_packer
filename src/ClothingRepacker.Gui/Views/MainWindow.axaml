@@ -101,8 +101,11 @@
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
               </Grid>
               <CheckBox Content="Save generated plan JSON" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
-              <CheckBox Content="Copy source resources to output before renaming" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}" />
-              <CheckBox Content="Optimize YMT usage" IsChecked="{Binding OptimizeYmtUsage, Mode=TwoWay}" />
+              <CheckBox Content="Copy source resources to output before renaming" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}"
+                        ToolTip.Tip="This copies the original resources to the output folder leaving the originals in place AdornerLayer modifying only the copies"/>
+              <CheckBox Content="Optimize YMT usage"
+                        IsChecked="{Binding OptimizeYmtUsage, Mode=TwoWay}"
+                        ToolTip.Tip="Rearranges component and prop lanes across generated YMTs to reduce the target count. Off by default because the conservative mode keeps source packs grouped together, and attempts to preserve relative source resource order." />
               <Expander Header="Advanced" HorizontalAlignment="Stretch">
                 <StackPanel Spacing="8" Margin="0,8,0,0">
                   <Button Content="Export XML"
@@ -113,7 +116,7 @@
                   <TextBox Text="{Binding MalePrefix, Mode=TwoWay}" />
                   <TextBlock Text="Female prefix" />
                   <TextBox Text="{Binding FemalePrefix, Mode=TwoWay}" />
-                  <CheckBox Content="Include debug client script" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" />
+                  <CheckBox Content="Include debug client script" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" ToolTip.Tip="Includes a client side debug script to verify the target collections are loaded correctly"/>
                   <CheckBox Content="Include preview YMT XML" IsChecked="{Binding IncludeYmtXml, Mode=TwoWay}" />
                   <CheckBox Content="Overwrite XML previews during export" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
                   <StackPanel Grid.Column="0" Spacing="4">
@@ -164,13 +167,22 @@
 
       <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="12">
         <Border Grid.Row="0" Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
-          <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+          <Grid RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8">
             <TextBlock Text="{Binding Status}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
             <Grid Grid.Row="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
               <TextBlock Grid.Column="0" Text="{Binding CurrentStage}" />
               <TextBlock Grid.Column="1" Text="{Binding ActivePath}" Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
             </Grid>
-            <ProgressBar Grid.Row="2" Minimum="0" Maximum="100" Value="{Binding ProgressValue}" />
+            <ProgressBar Grid.Row="2"
+                         Minimum="0"
+                         Maximum="100"
+                         Value="{Binding ProgressValue}" />
+            <ProgressBar Grid.Row="3"
+                         Height="3"
+                         Minimum="0"
+                         Maximum="100"
+                         IsVisible="{Binding IsBusy}"
+                         IsIndeterminate="True" />
           </Grid>
         </Border>
 

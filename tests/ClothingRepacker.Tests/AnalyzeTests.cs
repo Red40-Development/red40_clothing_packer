@@ -49,6 +49,7 @@ public class AnalyzeTests
 
         Assert.NotEmpty(updates);
         Assert.Contains(updates, update => update.Operation == "analyze" && update.Stage == "process-source" && update.Current > 0);
+        Assert.Contains(updates, update => update.Operation == "analyze" && update.Stage == "finalize-plan");
 
         var completed = Assert.Single(updates, update => update.Operation == "analyze" && update.Stage == "complete");
         Assert.Equal(result.Plan.SourceYmts.Count, completed.SourceCount);

@@ -880,6 +880,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             "start" => progress.Message ?? $"{progress.Operation} started.",
             "scan-resource" => progress.Message ?? $"Scanned {progress.Current}/{progress.Total} resources{path}",
             "process-source" => $"Analyzed {progress.Current}/{progress.Total} | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
+            "finalize-plan" => progress.Message ?? "Finalizing merge plan.",
             "load-source" => progress.Message ?? $"Loading source YMT {progress.Current}/{progress.Total}{path}",
             "build-target" => progress.Message ?? $"Building target collection {progress.Current}/{progress.Total}{path}",
             "build-creature-metadata" => progress.Message ?? $"Building creature metadata {progress.Current}/{progress.Total}{path}",

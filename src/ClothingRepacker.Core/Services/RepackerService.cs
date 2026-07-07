@@ -242,6 +242,17 @@ public sealed class RepackerService
                 TargetCount: targetPlans.Count));
         }
 
+        progress?.Report(new OperationProgress(
+            "analyze",
+            "finalize-plan",
+            targetPlans.Count,
+            targetPlans.Count,
+            Message: "Finalizing merge plan.",
+            SourceCount: sources.Count,
+            WarningCount: warnings.Count,
+            ErrorCount: errors.Count,
+            TargetCount: targetPlans.Count));
+
         var streamRenames = _streamRenamePlanner.BuildRenamePlan(drawableMappings, propMappings, streamFiles);
         errors.AddRange(_streamRenamePlanner.ValidateCollisions(streamRenames));
         var sourceCreatureMetadataBindings = BuildSourceCreatureMetadataBindings(sources, creatureMetadata, creatureMetadataReferencesByResource);

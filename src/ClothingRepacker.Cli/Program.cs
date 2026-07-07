@@ -142,7 +142,9 @@ public static class ProgramEntry
 
     private static async Task<int> RunRestoreAsync(RepackerService service, CliOptions options)
     {
-        await service.RestoreAsync(Required(options, "--backup-manifest"));
+        using var progressWriter = new ConsoleProgressWriter();
+        await service.RestoreAsync(Required(options, "--backup-manifest"), CreateConsoleProgress(progressWriter));
+        progressWriter.CompleteLine();
         Console.WriteLine("Restore complete.");
         return 0;
     }
@@ -359,6 +361,7 @@ Analyze options:
             "process-source" => $"{prefix}{progressBar} files | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
             "plan-targets" => $"{prefix} Planning target collections | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}",
             "build-plan" => $"{prefix}{progressBar} targets | planned {progress.TargetCount}{path}",
+            "finalize-plan" => $"{prefix}{progressBar} finalizing merge plan | targets {progress.TargetCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}",
             "load-source" => $"{prefix}{progressBar} source YMTs loading{path}",
             "build-target" => $"{prefix}{progressBar} target collections building{path}",
             "build-creature-metadata" => $"{prefix}{progressBar} creature metadata building{path}",
@@ -407,10 +410,24 @@ Analyze options:
 
 internal sealed class ConsoleProgressWriter : IDisposable
 {
+    private static readonly char[] SpinnerFrames = ['|', '/', '-', '\\'];
+
     private readonly object _gate = new();
     private readonly bool _useLiveUpdates = !Console.IsOutputRedirected;
+    private readonly Timer? _timer;
     private int _lastLength;
     private bool _hasActiveLine;
+    private int _spinnerIndex;
+    private string _currentText = "Working...";
+    private bool _isComplete;
+
+    public ConsoleProgressWriter()
+    {
+        if (_useLiveUpdates)
+        {
+            _timer = new Timer(Tick, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(125));
+        }
+    }
 
     public void Write(string text)
     {
@@ -422,14 +439,8 @@ internal sealed class ConsoleProgressWriter : IDisposable
                 return;
             }
 
-            var padded = text.Length < _lastLength
-                ? text + new string(' ', _lastLength - text.Length)
-                : text;
-
-            Console.Write('\r');
-            Console.Write(padded);
-            _lastLength = padded.Length;
-            _hasActiveLine = true;
+            _currentText = text;
+            RenderLine();
         }
     }
 
@@ -437,6 +448,13 @@ internal sealed class ConsoleProgressWriter : IDisposable
     {
         lock (_gate)
         {
+            if (_isComplete)
+            {
+                return;
+            }
+
+            _isComplete = true;
+            _timer?.Dispose();
             if (!_useLiveUpdates || !_hasActiveLine)
             {
                 return;
@@ -450,6 +468,33 @@ internal sealed class ConsoleProgressWriter : IDisposable
 
     public void Dispose()
         => CompleteLine();
+
+    private void Tick(object? state)
+    {
+        lock (_gate)
+        {
+            if (_isComplete)
+            {
+                return;
+            }
+
+            RenderLine();
+        }
+    }
+
+    private void RenderLine()
+    {
+        var frame = SpinnerFrames[_spinnerIndex++ % SpinnerFrames.Length];
+        var text = $"{frame} {_currentText}";
+        var padded = text.Length < _lastLength
+            ? text + new string(' ', _lastLength - text.Length)
+            : text;
+
+        Console.Write('\r');
+        Console.Write(padded);
+        _lastLength = padded.Length;
+        _hasActiveLine = true;
+    }
 }
 
 public sealed class CliOptions
