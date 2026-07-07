@@ -371,7 +371,9 @@ Analyze options:
             "copy-source-resource" => $"{prefix}{progressBar} source resources copied{path}",
             "rename-stream" => $"{prefix}{progressBar} stream files renamed | backups {progress.BackupCount}{path}",
             "backup-source-ymt" => $"{prefix}{progressBar} source YMTs backed up | renames {progress.RenameCount} | backups {progress.BackupCount}{path}",
+            "remove-source-ymt" => $"{prefix}{progressBar} source YMTs removed from copy | renames {progress.RenameCount} | removed {progress.RemovedCount}{path}",
             "backup-source-metadata" => $"{prefix}{progressBar} source metadata backed up | renames {progress.RenameCount} | backups {progress.BackupCount}{path}",
+            "remove-source-metadata" => $"{prefix}{progressBar} source metadata removed from copy | renames {progress.RenameCount} | removed {progress.RemovedCount}{path}",
             "copy-generated-resource" => $"{prefix} {progress.Message} | generated files {progress.WrittenFileCount}",
             "complete" => FormatCompleteProgress(prefix, progress),
             _ => $"{prefix} {progress.Message ?? progress.Stage}",
@@ -384,7 +386,9 @@ Analyze options:
         {
             "analyze" => $"sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount} | targets {progress.TargetCount} | renames {progress.RenameCount}",
             "build" => $"targets {progress.TargetCount} | files written {progress.WrittenFileCount}",
-            "apply" => $"renames {progress.RenameCount} | backups {progress.BackupCount} | generated files {progress.WrittenFileCount}",
+            "apply" => progress.RemovedCount > 0
+                ? $"renames {progress.RenameCount} | removed {progress.RemovedCount} | generated files {progress.WrittenFileCount}"
+                : $"renames {progress.RenameCount} | backups {progress.BackupCount} | generated files {progress.WrittenFileCount}",
             "export-xml" => $"written {progress.WrittenFileCount} | skipped {progress.SkippedCount}",
             _ => string.Empty,
         };

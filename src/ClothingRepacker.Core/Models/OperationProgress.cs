@@ -14,4 +14,5 @@ public sealed record OperationProgress(
     int WrittenFileCount = 0,
     int RenameCount = 0,
     int BackupCount = 0,
+    int RemovedCount = 0,
     int SkippedCount = 0);

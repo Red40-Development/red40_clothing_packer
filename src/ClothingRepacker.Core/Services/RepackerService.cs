@@ -788,12 +788,13 @@ public sealed class RepackerService
 
             progress?.Report(new OperationProgress(
                 "apply",
-                "backup-source-ymt",
+                pathMap.HasMappings ? "remove-source-ymt" : "backup-source-ymt",
                 index + 1,
                 mergedSources.Count,
                 sourcePath,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(IsSourceBackupEntry)));
+                BackupCount: entries.Count(IsSourceBackupEntry),
+                RemovedCount: pathMap.HasMappings ? index + 1 : 0));
         }
 
         for (var index = 0; index < plan.BrokenCreatureMetadataBackups.Count; index++)
@@ -845,14 +846,16 @@ public sealed class RepackerService
                 entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
             }
 
+            var metadataIndex = mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count + index + 1;
             progress?.Report(new OperationProgress(
                 "apply",
-                "backup-source-metadata",
-                mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count + index + 1,
+                pathMap.HasMappings ? "remove-source-metadata" : "backup-source-metadata",
+                metadataIndex,
                 sourceBackupPlanCount,
                 sourcePath,
                 RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(IsSourceBackupEntry)));
+                BackupCount: entries.Count(IsSourceBackupEntry),
+                RemovedCount: pathMap.HasMappings ? metadataIndex : 0));
         }
 
         if (plan.TargetCollections.Count > 0)
