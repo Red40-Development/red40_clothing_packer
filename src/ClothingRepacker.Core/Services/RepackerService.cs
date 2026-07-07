@@ -714,8 +714,11 @@ public sealed class RepackerService
             IncludeDebugClient = options.IncludeDebugClient,
         }, progress, cancellationToken);
         var entries = new List<BackupEntry>();
+        var renameMap = options.CopyResourcesToOutputBeforeRename
+            ? plan.StreamRenames.ToDictionary(rename => rename.SourcePath, rename => rename.TargetPath, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var pathMap = options.CopyResourcesToOutputBeforeRename
-            ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken)
+            ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken, renameMap)
             : new ResourcePathMap([]);
 
         if (options.CopyResourcesToOutputBeforeRename)
@@ -739,6 +742,23 @@ public sealed class RepackerService
             var rename = plan.StreamRenames[index];
             var sourcePath = pathMap.Map(rename.SourcePath);
             var targetPath = pathMap.Map(rename.TargetPath);
+
+            if (options.CopyResourcesToOutputBeforeRename && File.Exists(targetPath))
+            {
+                var copyBeforeHash = ComputeSha256(targetPath);
+                entries.Add(new BackupEntry("stream-rename", sourcePath, null, targetPath, copyBeforeHash, ComputeSha256(targetPath), DateTimeOffset.UtcNow));
+
+                progress?.Report(new OperationProgress(
+                    "apply",
+                    "rename-stream",
+                    index + 1,
+                    plan.StreamRenames.Count,
+                    targetPath,
+                    RenameCount: index + 1,
+                    BackupCount: entries.Count(IsSourceBackupEntry)));
+                continue;
+            }
+
             if (!File.Exists(sourcePath))
             {
                 throw new FileNotFoundException($"Source file missing at apply time: {sourcePath}");
@@ -962,7 +982,8 @@ public sealed class RepackerService
         string generatedResourcesRoot,
         List<BackupEntry> entries,
         IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? renameMap = null)
     {
         var mappings = new List<ResourceRootMapping>();
         for (var index = 0; index < resourceRoots.Count; index++)
@@ -985,7 +1006,7 @@ public sealed class RepackerService
                 Directory.Delete(destinationRoot, recursive: true);
             }
 
-            CopyDirectory(sourceRoot, destinationRoot, progress, "apply", "copy-source-file", cancellationToken);
+            CopyDirectory(sourceRoot, destinationRoot, progress, "apply", "copy-source-file", cancellationToken, renameMap);
             mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
             entries.Add(new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, null, DateTimeOffset.UtcNow));
 
@@ -2503,7 +2524,8 @@ end, false)
         IProgress<OperationProgress>? progress = null,
         string operation = "copy",
         string stage = "copy-file",
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<string, string>? renameMap = null)
     {
         var fullSource = NormalizePath(source);
         var fullDestination = NormalizePath(destination);
@@ -2521,7 +2543,11 @@ end, false)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var file = files[index];
-            var destinationFile = Path.Combine(fullDestination, Path.GetRelativePath(fullSource, file));
+            var relativePath = Path.GetRelativePath(fullSource, file);
+            var destinationFile = renameMap != null && renameMap.TryGetValue(relativePath, out var renamedRelative)
+                ? Path.Combine(fullDestination, renamedRelative)
+                : Path.Combine(fullDestination, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationFile)!);
             File.Copy(file, destinationFile, overwrite: true);
             progress?.Report(new OperationProgress(
                 operation,
