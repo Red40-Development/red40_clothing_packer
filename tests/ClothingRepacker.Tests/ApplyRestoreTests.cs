@@ -201,8 +201,8 @@ public class ApplyRestoreTests
         Assert.True(Directory.Exists(copiedResource));
         Assert.True(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
         Assert.Contains(entries, entry => entry.Kind == "stream-rename" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(entries, entry => entry.Kind == "old-ymt" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(2, entries.Count(entry => entry.Kind == "source-alternate-metadata" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase)));
+        Assert.DoesNotContain(entries, entry => entry.Kind == "old-ymt" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(entries, entry => entry.Kind == "source-alternate-metadata" && entry.OriginalPath.StartsWith(copiedResource, StringComparison.OrdinalIgnoreCase));
 
         var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
         await service.RestoreAsync(manifest);
@@ -272,6 +272,35 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_merged_f_001^decl_000_u.ydd")));
         Assert.True(File.Exists(Path.Combine(copiedResource, "stream", "mp_f_freemode_01_merged_f_001.ymt")));
         Assert.True(File.Exists(Path.Combine(copiedResource, "data", "mp_f_freemode_01_merged_f_001.meta")));
+    }
+
+    [Fact]
+    public async Task ApplyCopyModeRemovesStraySourceYmtAndMetaFilesFromCopiedOutput()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-stray-files-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "gang_flags", new MergePlanSettings());
+
+        var staleYmt = Path.Combine(resourceRoot, "stream", "legacy_source.ymt.xml");
+        var staleMeta = Path.Combine(resourceRoot, "data", "legacy_source.meta");
+        Directory.CreateDirectory(Path.GetDirectoryName(staleYmt)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(staleMeta)!);
+        await File.WriteAllTextAsync(staleYmt, "<root />");
+        await File.WriteAllTextAsync(staleMeta, "stale meta");
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedResource = Path.Combine(generatedRoot, "gang_flags");
+        Assert.False(File.Exists(Path.Combine(copiedResource, "stream", "legacy_source.ymt.xml")));
+        Assert.False(File.Exists(Path.Combine(copiedResource, "data", "legacy_source.meta")));
     }
 
     [Fact]

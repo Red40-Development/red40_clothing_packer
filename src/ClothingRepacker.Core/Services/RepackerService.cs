@@ -756,12 +756,19 @@ public sealed class RepackerService
                 continue;
             }
 
-            var backupPath = Path.Combine(backupDir, source.Resource, Path.GetFileName(source.Path));
-            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-            File.Copy(sourcePath, backupPath, overwrite: true);
-            var beforeHash = ComputeSha256(sourcePath);
-            File.Delete(sourcePath);
-            entries.Add(new BackupEntry("old-ymt", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+            if (pathMap.HasMappings)
+            {
+                File.Delete(sourcePath);
+            }
+            else
+            {
+                var backupPath = Path.Combine(backupDir, source.Resource, Path.GetFileName(source.Path));
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                File.Copy(sourcePath, backupPath, overwrite: true);
+                var beforeHash = ComputeSha256(sourcePath);
+                File.Delete(sourcePath);
+                entries.Add(new BackupEntry("old-ymt", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+            }
 
             progress?.Report(new OperationProgress(
                 "apply",
@@ -808,12 +815,19 @@ public sealed class RepackerService
                 continue;
             }
 
-            var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-            File.Copy(sourcePath, backupPath, overwrite: true);
-            var beforeHash = ComputeSha256(sourcePath);
-            File.Delete(sourcePath);
-            entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+            if (pathMap.HasMappings)
+            {
+                File.Delete(sourcePath);
+            }
+            else
+            {
+                var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                File.Copy(sourcePath, backupPath, overwrite: true);
+                var beforeHash = ComputeSha256(sourcePath);
+                File.Delete(sourcePath);
+                entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+            }
 
             progress?.Report(new OperationProgress(
                 "apply",
@@ -830,9 +844,16 @@ public sealed class RepackerService
             var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
             var generatedRootIsCopiedSourceResource = resourceRootsToCopy.Any(resourceRoot =>
                 PathsEqual(GetResourceCopyDestination(resourceRoot, generatedResourcesRoot), generatedRoot));
-            if (Directory.Exists(generatedRoot) && !generatedRootIsCopiedSourceResource)
+            if (Directory.Exists(generatedRoot))
             {
-                Directory.Delete(generatedRoot, recursive: true);
+                if (generatedRootIsCopiedSourceResource)
+                {
+                    RemoveOverlayArtifacts(generatedRoot);
+                }
+                else
+                {
+                    Directory.Delete(generatedRoot, recursive: true);
+                }
             }
 
             CopyDirectory(
@@ -875,6 +896,29 @@ public sealed class RepackerService
         => !string.IsNullOrWhiteSpace(plan.GeneratedResourcesRoot)
             ? Path.GetFullPath(plan.GeneratedResourcesRoot)
             : Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot;
+
+    private static void RemoveOverlayArtifacts(string root)
+    {
+        if (!Directory.Exists(root))
+        {
+            return;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                     .Where(path => IsOverlayArtifact(path))
+                     .ToList())
+        {
+            File.Delete(file);
+        }
+    }
+
+    private static bool IsOverlayArtifact(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".ymt", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".meta", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static IReadOnlyList<SourceAlternateMetadataBackupPlan> GetSourceAlternateMetadataBackupPlans(MergePlan plan)
     {
@@ -2404,6 +2448,8 @@ end, false)
                 .OrderByDescending(mapping => NormalizePath(mapping.SourceRoot).Length)
                 .ToList();
         }
+
+        public bool HasMappings => _mappings.Count > 0;
 
         public string Map(string path)
         {
