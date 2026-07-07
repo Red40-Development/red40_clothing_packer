@@ -19,6 +19,7 @@ Like this tool and want to support further development? Checkout our store [Red4
 - Download the [release version](https://github.com/Red40-Development/red40_clothing_packer/releases/latest) approriate for your architecture (Windows/Linux x86-64 builds)
 
 - Launch and follow the steps in the help button
+- Enable `Optimize YMT usage` before Analyze if you want the planner to rearrange component/prop lanes across generated YMTs to reduce the target collection count. Leave it off to keep source packs grouped more conservatively. Note that if you have a large number of a single component such as JBIB this will tend to leave ymts with little to no other items in them.
 
 ![Preview 1](.github/assets/red40_clothing_packer_1.png)
 
@@ -60,9 +61,11 @@ If you are running from source, use `dotnet run --project src/ClothingRepacker.C
 ```bash
 ClothingRepacker.Cli analyze --resources <path> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--optimize-ymt-usage]
 ClothingRepacker.Cli analyze --resource <path_to_resource> [--resource <path_to_resource> ...]
   --generated-root <folder> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--optimize-ymt-usage]
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
@@ -104,6 +107,8 @@ ClothingRepacker.Cli analyze \
 ```
 
 When using one or more `--resource` options, each value must be an actual resource folder. `--generated-root` controls where `apply` will copy the generated merged resource.
+
+By default, analyze keeps each source YMT's component and prop lanes together unless a source exceeds the configured drawable limits. Add `--optimize-ymt-usage` to let the planner split source lanes across generated YMTs when that can produce fewer target collections. This can reduce YMT usage, but the resulting plan may mix pieces of the same source pack across multiple generated collections.
 
 Validate the generated plan:
 
