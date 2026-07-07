@@ -275,6 +275,66 @@ public class ApplyRestoreTests
     }
 
     [Fact]
+    public async Task ApplyCopyModeRemovesSourceMetaManifestEntriesFromCopiedResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-manifest-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = true,
+        });
+
+        var copiedManifest = Path.Combine(generatedRoot, "gang_flags", "fxmanifest.lua");
+        Assert.True(File.Exists(copiedManifest));
+        var manifestText = await File.ReadAllTextAsync(copiedManifest);
+        Assert.DoesNotContain("SHOP_PED_APPAREL_META_FILE", manifestText);
+        Assert.DoesNotContain("ALTERNATE_VARIATIONS_FILE", manifestText);
+        Assert.DoesNotContain("mp_m_freemode_01_mp_m_gang_flags.meta", manifestText);
+        Assert.DoesNotContain("mp_f_freemode_01_mp_f_gang_flags.meta", manifestText);
+        Assert.Contains("fx_version", manifestText);
+    }
+
+    [Fact]
+    public async Task ApplyRenameInPlaceBacksUpAndSanitizesOriginalManifest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"rename-in-place-manifest-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var manifestPath = Path.Combine(resourceRoot, "fxmanifest.lua");
+        var originalManifest = await File.ReadAllTextAsync(manifestPath);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+
+        var entries = await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"), new ApplyOptions
+        {
+            CopyResourcesToOutputBeforeRename = false,
+        });
+
+        var updatedManifest = await File.ReadAllTextAsync(manifestPath);
+        Assert.NotEqual(originalManifest, updatedManifest);
+        Assert.DoesNotContain("SHOP_PED_APPAREL_META_FILE", updatedManifest);
+        Assert.DoesNotContain("ALTERNATE_VARIATIONS_FILE", updatedManifest);
+        Assert.DoesNotContain("mp_m_freemode_01_mp_m_gang_flags.meta", updatedManifest);
+        Assert.DoesNotContain("mp_f_freemode_01_mp_f_gang_flags.meta", updatedManifest);
+        Assert.Contains(entries, entry => entry.Kind == "resource-manifest" && entry.OriginalPath == manifestPath && entry.BackupPath is not null && File.Exists(entry.BackupPath));
+
+        var manifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        await service.RestoreAsync(manifest);
+        Assert.Equal(originalManifest, await File.ReadAllTextAsync(manifestPath));
+    }
+
+    [Fact]
     public async Task ApplyCopyModeRemovesStraySourceYmtAndMetaFilesFromCopiedOutput()
     {
         var root = Path.Combine(Path.GetTempPath(), $"copy-before-rename-stray-files-test-{Guid.NewGuid():N}");

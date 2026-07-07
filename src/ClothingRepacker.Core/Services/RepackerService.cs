@@ -718,6 +718,22 @@ public sealed class RepackerService
             ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken)
             : new ResourcePathMap([]);
 
+        if (options.CopyResourcesToOutputBeforeRename)
+        {
+            foreach (var sourceRoot in resourceRootsToCopy)
+            {
+                var copiedRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
+                SanitizeResourceManifest(copiedRoot, entries: null, backupManifestRoot: null);
+            }
+        }
+        else
+        {
+            foreach (var sourceRoot in GetKnownResourceRoots(plan))
+            {
+                SanitizeResourceManifest(sourceRoot, entries, backupDir);
+            }
+        }
+
         for (var index = 0; index < plan.StreamRenames.Count; index++)
         {
             var rename = plan.StreamRenames[index];
@@ -936,7 +952,7 @@ public sealed class RepackerService
     }
 
     private static bool IsSourceBackupEntry(BackupEntry entry)
-        => entry.Kind is "old-ymt" or "broken-creature-metadata" or "source-alternate-metadata";
+        => entry.Kind is "old-ymt" or "broken-creature-metadata" or "source-alternate-metadata" or "resource-manifest";
 
     private static ResourcePathMap CopySourceResourcesToOutput(
         IReadOnlyList<string> resourceRoots,
@@ -980,6 +996,97 @@ public sealed class RepackerService
         }
 
         return new ResourcePathMap(mappings);
+    }
+
+    private static void SanitizeResourceManifest(string resourceRoot, List<BackupEntry>? entries = null, string? backupManifestRoot = null)
+    {
+        if (string.IsNullOrWhiteSpace(resourceRoot) || !Directory.Exists(resourceRoot))
+        {
+            return;
+        }
+
+        var manifestPath = FindResourceManifestPath(resourceRoot);
+        if (manifestPath is null)
+        {
+            return;
+        }
+
+        var originalText = File.ReadAllText(manifestPath);
+        var updatedText = SanitizeManifestText(originalText);
+        if (string.Equals(originalText, updatedText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var backupPath = backupManifestRoot is null
+            ? null
+            : Path.Combine(backupManifestRoot, Path.GetFileName(resourceRoot), Path.GetFileName(manifestPath));
+        if (backupPath is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+            File.Copy(manifestPath, backupPath, overwrite: true);
+        }
+
+        File.WriteAllText(manifestPath, updatedText);
+        if (entries is not null && backupPath is not null)
+        {
+            entries.Add(new BackupEntry(
+                "resource-manifest",
+                manifestPath,
+                backupPath,
+                manifestPath,
+                ComputeSha256(manifestPath),
+                ComputeSha256(manifestPath),
+                DateTimeOffset.UtcNow));
+        }
+    }
+
+    private static string? FindResourceManifestPath(string resourceRoot)
+    {
+        foreach (var manifestName in new[] { "fxmanifest.lua", "__resource.lua" })
+        {
+            var path = Path.Combine(resourceRoot, manifestName);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static string SanitizeManifestText(string text)
+    {
+        var lines = text.Split(["\r\n", "\n"], StringSplitOptions.None);
+        var sanitizedLines = new List<string>(lines.Length);
+        foreach (var line in lines)
+        {
+            if (IsManifestDataFileLine(line) || IsManifestFilesEntryLine(line))
+            {
+                continue;
+            }
+
+            sanitizedLines.Add(line);
+        }
+
+        return string.Join(Environment.NewLine, sanitizedLines);
+    }
+
+    private static bool IsManifestDataFileLine(string line)
+        => Regex.IsMatch(line, @"^\s*data_file\s+'(?:SHOP_PED_APPAREL_META_FILE|ALTERNATE_VARIATIONS_FILE|PED_FIRST_PERSON_ALTERNATE_DATA)'", RegexOptions.IgnoreCase);
+
+    private static bool IsManifestFilesEntryLine(string line)
+    {
+        var match = Regex.Match(line, @"^\s*'([^']+)'\s*,?\s*$");
+        if (!match.Success)
+        {
+            return false;
+        }
+
+        var value = match.Groups[1].Value;
+        return value.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+            && !value.Contains('*')
+            && !value.Contains('?');
     }
 
     private static IReadOnlyList<string> GetResourceRootsForCopy(MergePlan plan)
