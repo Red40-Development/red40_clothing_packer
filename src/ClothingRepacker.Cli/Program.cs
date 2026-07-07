@@ -79,7 +79,6 @@ public static class ProgramEntry
             MaxDrawablesPerProp = ParseInt(
                 options.GetValueOrDefault("--max-drawables-per-prop"),
                 legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerProp),
-            ShopMetaMode = options.GetValueOrDefault("--shop-meta-mode") ?? "complete",
         };
 
         var result = await AnalyzeWithOptionsAsync(service, options, targetResource, settings, CreateConsoleProgress(progressWriter));
