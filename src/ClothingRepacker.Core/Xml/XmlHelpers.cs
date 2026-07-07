@@ -11,9 +11,6 @@ public static class XmlHelpers
     public static void SetValueAttr(XElement element, int value)
         => element.SetAttributeValue("value", value.ToString(CultureInfo.InvariantCulture));
 
-    public static string ValueText(XElement element)
-        => element.Value.Trim();
-
     public static List<XElement> Items(XElement? container)
         => container?.Elements("Item").ToList() ?? [];
 
