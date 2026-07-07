@@ -97,7 +97,6 @@ public class AnalyzeTests
         var build = await service.BuildAsync(analyze.Plan, outputRoot);
 
         Assert.Empty(analyze.Plan.TargetCollections);
-        Assert.Empty(analyze.Plan.StandaloneResources);
         Assert.Empty(build.WrittenFiles);
         Assert.False(Directory.Exists(Path.Combine(outputRoot, "zz_merged_clothing_meta")));
         Assert.Contains(analyze.Plan.Warnings, warning => warning.Contains("Non-freemode YMT skipped", StringComparison.OrdinalIgnoreCase));

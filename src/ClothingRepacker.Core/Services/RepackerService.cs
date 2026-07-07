@@ -310,7 +310,6 @@ public sealed class RepackerService
             Settings = settings,
             SourceYmts = sourceYmtSummaries,
             TargetCollections = targetPlans,
-            StandaloneResources = [],
             DrawableMappings = drawableMappings,
             PropMappings = propMappings,
             StreamRenames = streamRenames.ToList(),
@@ -523,23 +522,6 @@ public sealed class RepackerService
                 await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
                 writtenFiles.Add(validationPath);
             }
-        }
-
-        foreach (var standaloneResource in plan.StandaloneResources)
-        {
-            var resourceRoot = Path.Combine(fullOutputRoot, standaloneResource.OutputResource);
-            foreach (var file in standaloneResource.Files)
-            {
-                var outputPath = Path.Combine(fullOutputRoot, file.OutputPath.Replace('/', Path.DirectorySeparatorChar));
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                File.Copy(file.SourcePath, outputPath, overwrite: true);
-                writtenFiles.Add(outputPath);
-            }
-
-            var manifestPath = Path.Combine(resourceRoot, "fxmanifest.lua");
-            Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
-            await File.WriteAllTextAsync(manifestPath, BuildStandaloneFxManifest(standaloneResource), cancellationToken);
-            writtenFiles.Add(manifestPath);
         }
 
         progress?.Report(new OperationProgress(
@@ -850,24 +832,6 @@ public sealed class RepackerService
                 "copy-generated-file",
                 cancellationToken);
             entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
-        }
-
-        foreach (var standaloneResource in plan.StandaloneResources)
-        {
-            var standaloneGeneratedRoot = Path.Combine(generatedResourcesRoot, standaloneResource.OutputResource);
-            if (Directory.Exists(standaloneGeneratedRoot))
-            {
-                Directory.Delete(standaloneGeneratedRoot, recursive: true);
-            }
-
-            CopyDirectory(
-                Path.Combine(buildResult.OutputRoot, standaloneResource.OutputResource),
-                standaloneGeneratedRoot,
-                progress,
-                "apply",
-                "copy-generated-file",
-                cancellationToken);
-            entries.Add(new BackupEntry("generated-resource", standaloneGeneratedRoot, null, standaloneGeneratedRoot, string.Empty, null, DateTimeOffset.UtcNow));
         }
 
         progress?.Report(new OperationProgress(
@@ -1927,58 +1891,6 @@ public sealed class RepackerService
            && (source.PedBaseName.Equals("mp_f_freemode_01", StringComparison.OrdinalIgnoreCase)
                || source.PedBaseName.Equals("mp_m_freemode_01", StringComparison.OrdinalIgnoreCase));
 
-    private static IReadOnlyList<StandaloneResourcePlan> BuildStandaloneResourcePlans(
-        IReadOnlyList<SourceYmt> sources,
-        IReadOnlyList<StreamFile> streamFiles,
-        string targetResource,
-        List<string> warnings)
-    {
-        var plans = new List<StandaloneResourcePlan>();
-        foreach (var resourceGroup in sources.GroupBy(source => (source.ResourceName, source.ResourceRoot)))
-        {
-            var outputResource = $"{targetResource}_standalone_{SanitizeResourceName(resourceGroup.Key.ResourceName)}";
-            var files = new Dictionary<string, SourceFileCopyPlan>(StringComparer.OrdinalIgnoreCase);
-            foreach (var source in resourceGroup)
-            {
-                warnings.Add($"Non-freemode YMT will be copied unchanged into standalone resource '{outputResource}': {source.YmtPath}");
-                AddStandaloneFile(files, source.ResourceRoot, source.YmtPath, outputResource);
-
-                foreach (var streamFile in streamFiles.Where(file =>
-                             file.ResourceRoot.Equals(source.ResourceRoot, StringComparison.OrdinalIgnoreCase)
-                             && IsRelatedStandaloneStreamFile(file, source)))
-                {
-                    AddStandaloneFile(files, source.ResourceRoot, streamFile.FullPath, outputResource);
-                }
-            }
-
-            plans.Add(new StandaloneResourcePlan(
-                resourceGroup.Key.ResourceName,
-                outputResource,
-                files.Values.OrderBy(file => file.OutputPath, StringComparer.OrdinalIgnoreCase).ToList()));
-        }
-
-        return plans;
-    }
-
-    private static void AddStandaloneFile(Dictionary<string, SourceFileCopyPlan> files, string sourceRoot, string sourcePath, string outputResource)
-    {
-        var relativePath = Path.GetRelativePath(sourceRoot, sourcePath).Replace(Path.DirectorySeparatorChar, '/');
-        files[sourcePath] = new SourceFileCopyPlan(sourcePath, $"{outputResource}/{relativePath}");
-    }
-
-    private static bool IsRelatedStandaloneStreamFile(StreamFile file, SourceYmt source)
-    {
-        if (file.FullPath.Equals(source.YmtPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return file.FileName.StartsWith($"{source.FullCollectionName}^", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string SanitizeResourceName(string resourceName)
-        => Regex.Replace(resourceName, @"[^A-Za-z0-9_]+", "_");
-
     private static IEnumerable<SourceManifestWarning> ReadManifestWarnings(ResourceScanItem item)
     {
         if (item.ManifestPath is null)
@@ -2350,18 +2262,6 @@ public sealed class RepackerService
             sb.AppendLine("client_script 'client/validate_collections.lua'");
         }
 
-        return sb.ToString();
-    }
-
-    private static string BuildStandaloneFxManifest(StandaloneResourcePlan plan)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("fx_version 'cerulean'");
-        sb.AppendLine("game 'gta5'");
-        sb.AppendLine();
-        sb.AppendLine("author 'Red40 ClothingRepacker'");
-        sb.AppendLine($"description 'Unmodified non-freemode clothing files copied from {plan.SourceResource}'");
-        sb.AppendLine("version '1.0.0'");
         return sb.ToString();
     }
 

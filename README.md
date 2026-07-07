@@ -102,7 +102,7 @@ ClothingRepacker.Cli analyze \
   --out plan.json
 ```
 
-When using one or more `--resource` options, each value must be an actual resource folder. `--generated-root` controls where `apply` will copy the generated merged resource and any standalone generated resources.
+When using one or more `--resource` options, each value must be an actual resource folder. `--generated-root` controls where `apply` will copy the generated merged resource.
 
 Validate the generated plan:
 
