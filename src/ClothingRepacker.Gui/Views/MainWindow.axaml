@@ -1,5 +1,6 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:ClothingRepacker.Gui.Controls"
         x:Class="ClothingRepacker.Gui.Views.MainWindow"
         Title="Red40 Clothing Repacker"
         Width="1280"
@@ -193,6 +194,41 @@
           </TabItem>
           <TabItem Header="Summary">
             <ListBox ItemsSource="{Binding SummaryLines}" />
+          </TabItem>
+          <TabItem Header="Repack Map">
+            <Grid RowDefinitions="2*,4,*" RowSpacing="6" Margin="2">
+              <ScrollViewer Grid.Row="0"
+                            HorizontalScrollBarVisibility="Auto"
+                            VerticalScrollBarVisibility="Auto">
+                <controls:RepackMapControl Report="{Binding RepackReport}"
+                                           MinHeight="240" />
+              </ScrollViewer>
+              <GridSplitter Grid.Row="1"
+                            ResizeDirection="Rows"
+                            HorizontalAlignment="Stretch"
+                            Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}" />
+              <ListBox Grid.Row="2"
+                       ItemsSource="{Binding RepackReportLines}"
+                       ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                       ScrollViewer.VerticalScrollBarVisibility="Visible">
+                <ListBox.Styles>
+                  <Style Selector="ListBoxItem">
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="Padding" Value="2,0" />
+                    <Setter Property="Focusable" Value="False" />
+                  </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}"
+                               FontFamily="Consolas, DejaVu Sans Mono"
+                               FontSize="12"
+                               LineHeight="15"
+                               TextWrapping="NoWrap" />
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
           </TabItem>
           <TabItem Header="Warnings">
             <ListBox ItemsSource="{Binding Warnings}" />

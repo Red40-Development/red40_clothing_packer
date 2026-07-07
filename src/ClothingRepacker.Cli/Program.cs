@@ -1,5 +1,6 @@
 using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Models;
+using ClothingRepacker.Core.Reporting;
 using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core;
 using ClothingRepacker.CodeWalker;
@@ -46,6 +47,8 @@ public static class ProgramEntry
                     return await RunRestoreAsync(service, options);
                 case "validate":
                     return await RunValidateAsync(service, options);
+                case "report":
+                    return await RunReportAsync(service, options);
                 case "export-xml":
                     return await RunExportXmlAsync(service, options);
                 default:
@@ -175,6 +178,28 @@ public static class ProgramEntry
         throw new InvalidOperationException("validate requires --plan, --resources, or at least one --resource.");
     }
 
+    private static async Task<int> RunReportAsync(RepackerService service, CliOptions options)
+    {
+        var plan = await service.LoadPlanAsync(Required(options, "--plan"));
+        var report = new YmtRepackReportBuilder().Build(plan);
+        var text = new YmtRepackReportFormatter().Format(report);
+        if (options.TryGetValue("--out", out var outPath) && !string.IsNullOrWhiteSpace(outPath))
+        {
+            var directory = Path.GetDirectoryName(outPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            await File.WriteAllTextAsync(outPath, text + Environment.NewLine);
+            Console.WriteLine($"Wrote YMT repack report to {outPath}.");
+            return 0;
+        }
+
+        Console.WriteLine(text);
+        return 0;
+    }
+
     private static async Task<int> RunExportXmlAsync(RepackerService service, CliOptions options)
     {
         using var progressWriter = new ConsoleProgressWriter();
@@ -232,6 +257,7 @@ clothing-repacker restore --backup-manifest <backup-manifest.json>
 clothing-repacker validate --plan <plan.json>
 clothing-repacker validate --resources <path>
 clothing-repacker validate --resource <path> [--resource <path> ...] --generated-root <folder>
+clothing-repacker report --plan <plan.json> [--out <report.txt>]
 clothing-repacker export-xml --folder <path> [--overwrite]
 
 Global options:

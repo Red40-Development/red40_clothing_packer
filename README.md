@@ -71,6 +71,7 @@ ClothingRepacker.Cli restore --backup-manifest <backup-manifest.json>
 ClothingRepacker.Cli validate --plan <plan.json>
 ClothingRepacker.Cli validate --resources <path>
 ClothingRepacker.Cli validate --resource <path_to_resource> [--resource <path_to_resource> ...] --generated-root <folder>
+ClothingRepacker.Cli report --plan <plan.json> [--out <report.txt>]
 ClothingRepacker.Cli export-xml --folder <path> [--overwrite]
 ```
 
@@ -108,6 +109,12 @@ Validate the generated plan:
 
 ```bash
 ClothingRepacker.Cli validate --plan plan.json
+```
+
+Generate a text report showing how source YMT component/prop ranges will land in each merged target YMT:
+
+```bash
+ClothingRepacker.Cli report --plan plan.json --out repack-report.txt
 ```
 
 Build the merged resource into a separate output folder (disable the ymt-xml or debug commands as appropriate):

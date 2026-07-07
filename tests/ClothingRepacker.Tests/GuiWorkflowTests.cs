@@ -48,8 +48,32 @@ public class GuiWorkflowTests
         Assert.Equal(2, vm.Summary.SourceYmtCount);
         Assert.Equal(1, vm.Summary.TargetCollectionCount);
         Assert.Equal(1, vm.Summary.WarningCount);
+        Assert.True(vm.HasRepackReport);
+        Assert.Contains(vm.RepackReportLines, line => line.Contains("pack_a", StringComparison.OrdinalIgnoreCase));
         Assert.True(vm.CanBuildPreview());
         Assert.False(vm.CanApply());
+    }
+
+    [Fact]
+    public async Task ChangingPlanInputsClearsRepackReport()
+    {
+        var root = CreateTempDirectory("gui-repack-report-reset");
+        var workflow = new FakeWorkflow
+        {
+            AnalyzeResult = BuildAnalyzeResult(errorCount: 0, warningCount: 0),
+        };
+        var vm = CreateViewModel(workflow);
+        vm.SelectResourcesFolder(root);
+
+        await vm.AnalyzeAsync();
+
+        Assert.True(vm.HasRepackReport);
+
+        vm.TargetResource = "zz_other_clothing_meta";
+
+        Assert.False(vm.HasRepackReport);
+        Assert.Null(vm.RepackReport);
+        Assert.Empty(vm.RepackReportLines);
     }
 
     [Fact]
@@ -429,12 +453,26 @@ public class GuiWorkflowTests
             TargetResource = "zz_merged_clothing_meta",
             SourceYmts =
             [
-                new SourceYmtSummary("pack_a", "/tmp/a.ymt", "mp_f_freemode_01", PedGender.Female, "pack_a", "mp_f_freemode_01_pack_a", "hash_00000000", [], []),
+                new SourceYmtSummary("pack_a", "/tmp/a.ymt", "mp_f_freemode_01", PedGender.Female, "pack_a", "mp_f_freemode_01_pack_a", "hash_00000000", new Dictionary<int, int> { [11] = 2 }, []),
                 new SourceYmtSummary("pack_b", "/tmp/b.ymt", "mp_m_freemode_01", PedGender.Male, "pack_b", "mp_m_freemode_01_pack_b", "hash_00000000", [], []),
             ],
             TargetCollections =
             [
-                new TargetCollectionPlan("merged_f_001", "mp_f_freemode_01_merged_f_001", PedGender.Female, "zz_merged_clothing_meta/stream/mp_f_freemode_01_merged_f_001.ymt", ["/tmp/a.ymt"], [], [], [], []),
+                new TargetCollectionPlan(
+                    "merged_f_001",
+                    "mp_f_freemode_01_merged_f_001",
+                    PedGender.Female,
+                    "zz_merged_clothing_meta/stream/mp_f_freemode_01_merged_f_001.ymt",
+                    ["/tmp/a.ymt"],
+                    [],
+                    [],
+                    new Dictionary<int, int> { [11] = 2 },
+                    []),
+            ],
+            DrawableMappings =
+            [
+                new DrawableMapping("pack_a", "/tmp/a.ymt", "pack_a", "mp_f_freemode_01_pack_a", "merged_f_001", "mp_f_freemode_01_merged_f_001", "mp_f_freemode_01", 11, 0, 0),
+                new DrawableMapping("pack_a", "/tmp/a.ymt", "pack_a", "mp_f_freemode_01_pack_a", "merged_f_001", "mp_f_freemode_01_merged_f_001", "mp_f_freemode_01", 11, 1, 1),
             ],
             StreamRenames =
             [

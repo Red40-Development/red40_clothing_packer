@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Reflection;
 using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
+using ClothingRepacker.Core.Reporting;
 using ClothingRepacker.Core.Scanning;
 using ClothingRepacker.Gui.Models;
 using ClothingRepacker.Gui.Services;
@@ -49,6 +50,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private int _progressTotal;
     private int _selectedTabIndex;
     private WorkflowSummary _summary = new(0, 0, 0, 0, 0);
+    private YmtRepackReport? _repackReport;
     private RestoreManifestPreview? _restorePreview;
     private int _restoreManifestLoadVersion;
     private IReadOnlyList<string> _restoreSummaryLines = [];
@@ -422,6 +424,20 @@ public sealed class MainWindowViewModel : ViewModelBase
         private set => SetProperty(ref _summary, value);
     }
 
+    public YmtRepackReport? RepackReport
+    {
+        get => _repackReport;
+        private set
+        {
+            if (SetProperty(ref _repackReport, value))
+            {
+                OnPropertyChanged(nameof(HasRepackReport));
+            }
+        }
+    }
+
+    public bool HasRepackReport => _repackReport is { SegmentCount: > 0 };
+
     public bool HasRestoreManifestPreview => _restorePreview is not null;
 
     public int PlannedBackupCount => (_lastPlan?.TargetCollections.SelectMany(target => target.SourceYmts).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0)
@@ -591,8 +607,9 @@ public sealed class MainWindowViewModel : ViewModelBase
                 result.Plan.StreamRenames.Count,
                 result.Plan.Warnings.Count,
                 result.Plan.Errors.Count);
+            SetRepackReport(result.Plan);
             SetSummaryLines("Analyze", Summary);
-            SelectedTabIndex = 1;
+            SelectedTabIndex = result.Plan.TargetCollections.Count > 0 ? 2 : 1;
             Status = result.Plan.Errors.Count == 0
                 ? "Analyze complete. Build Preview is available."
                 : $"Analyze complete with {result.Plan.Errors.Count} error(s). Fix errors before build/apply.";
@@ -954,6 +971,17 @@ public sealed class MainWindowViewModel : ViewModelBase
         RestoreActionLines = actionLines;
     }
 
+    private void SetRepackReport(MergePlan plan)
+    {
+        RepackReport = new YmtRepackReportBuilder().Build(plan);
+        RepackReportLines.Clear();
+        var text = new YmtRepackReportFormatter().Format(RepackReport);
+        foreach (var line in text.Split(Environment.NewLine))
+        {
+            RepackReportLines.Add(line);
+        }
+    }
+
     private void RefreshRestoreText()
     {
         RestoreSummaryText = string.Join(Environment.NewLine, RestoreSummaryLines);
@@ -1030,6 +1058,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         Warnings.Clear();
         Errors.Clear();
         Files.Clear();
+        RepackReport = null;
+        RepackReportLines.Clear();
         RefreshCommands();
     }
 
