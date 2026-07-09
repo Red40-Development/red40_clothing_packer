@@ -21,9 +21,13 @@ Like this tool and want to support further development? Checkout our store [Red4
 - Launch and follow the steps in the help button
 - Enable `Optimize YMT usage` before Analyze if you want the planner to rearrange component/prop lanes across generated YMTs to reduce the target collection count. Leave it off to keep source packs grouped more conservatively. Note that if you have a large number of a single component such as JBIB this will tend to leave ymts with little to no other items in them.
 
+- Now featuring a graphical representation of the repacked ymts
+
 ![Preview 1](.github/assets/red40_clothing_packer_1.png)
 
 ![Preview 2](.github/assets/red40_clothing_packer_2.png)
+
+![Preview 3](.github/assets/red40_clothing_packer_3.png)
 
 ## CLI directions
 
