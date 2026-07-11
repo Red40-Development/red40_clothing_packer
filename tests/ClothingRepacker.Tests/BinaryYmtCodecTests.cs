@@ -56,6 +56,20 @@ public class BinaryYmtCodecTests
     }
 
     [Fact]
+    public void ConvertsUnsignedDecimalSignedVariationIndexBeforeMetaEncoding()
+    {
+        var xml = new XDocument(
+            new XElement("CPedVariationInfo",
+                new XElement("pedCompVarIndex", new XAttribute("value", uint.MaxValue)),
+                new XElement("flags", new XAttribute("value", uint.MaxValue))));
+
+        var prepared = CodeWalkerYmtCodec.PrepareXmlForCodeWalkerMeta(xml);
+
+        Assert.Equal("-1", prepared.Root!.Element("pedCompVarIndex")!.Attribute("value")!.Value);
+        Assert.Equal("4294967295", prepared.Root.Element("flags")!.Attribute("value")!.Value);
+    }
+
+    [Fact]
     public async Task DecodesBinaryCreatureMetadataFixture()
     {
         var path = Fixture("mp_creaturemetadata.ymt");

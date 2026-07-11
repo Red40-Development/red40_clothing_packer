@@ -63,7 +63,7 @@ public sealed class CodeWalkerYmtCodec : IYmtCodec
             ? MetaFormat.RBF
             : MetaFormat.RSC;
 
-    private static XDocument PrepareXmlForCodeWalkerMeta(XDocument xml)
+    internal static XDocument PrepareXmlForCodeWalkerMeta(XDocument xml)
     {
         var clone = new XDocument(xml);
         foreach (var attribute in clone.Descendants().Attributes("value"))
@@ -72,9 +72,17 @@ public sealed class CodeWalkerYmtCodec : IYmtCodec
             if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                 && uint.TryParse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
             {
-                attribute.Value = IsSignedIndexAttribute(attribute) && value > int.MaxValue
-                    ? unchecked((int)value).ToString(CultureInfo.InvariantCulture)
-                    : value.ToString(CultureInfo.InvariantCulture);
+                attribute.Value = FormatMetaInteger(attribute, value);
+            }
+            else if (IsSignedIndexAttribute(attribute)
+                     && uint.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unsignedValue)
+                     && unsignedValue > int.MaxValue)
+            {
+                // Some tools emit signed variation indexes as their unsigned
+                // two's-complement decimal representation (for example,
+                // 4294967295 for -1). CodeWalker uses Convert.ToInt32 for
+                // these fields and otherwise throws before the YMT is built.
+                attribute.Value = unchecked((int)unsignedValue).ToString(CultureInfo.InvariantCulture);
             }
         }
 
@@ -107,6 +115,11 @@ public sealed class CodeWalkerYmtCodec : IYmtCodec
 
     private static string FormatHexValue(uint value)
         => $"0x{value:X}";
+
+    private static string FormatMetaInteger(XAttribute attribute, uint value)
+        => IsSignedIndexAttribute(attribute) && value > int.MaxValue
+            ? unchecked((int)value).ToString(CultureInfo.InvariantCulture)
+            : value.ToString(CultureInfo.InvariantCulture);
 
     private static bool IsSignedIndexAttribute(XAttribute attribute)
         => attribute.Parent?.Name.LocalName.EndsWith("VarIndex", StringComparison.OrdinalIgnoreCase) == true;
