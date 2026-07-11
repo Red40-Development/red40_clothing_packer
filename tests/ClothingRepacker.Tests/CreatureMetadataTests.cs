@@ -225,7 +225,7 @@ public class CreatureMetadataTests
     }
 
     [Fact]
-    public async Task BuildWritesEmptyCreatureMetadataWhenNoSourceMetadataExists()
+    public async Task BuildDoesNotWriteCreatureMetadataWhenNoSourceMetadataExists()
     {
         var root = Path.Combine(Path.GetTempPath(), $"empty-creature-metadata-test-{Guid.NewGuid():N}");
         var resources = Path.Combine(root, "resources");
@@ -235,7 +235,7 @@ public class CreatureMetadataTests
         var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var outputRoot = Path.Combine(root, "out");
 
-        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        var build = await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
         {
             IncludeYmtXml = true,
         });
@@ -246,11 +246,9 @@ public class CreatureMetadataTests
             "stream",
             "MP_CreatureMetadata_merged_f_001.ymt.xml");
         Assert.Empty(analyze.Plan.SourceCreatureMetadata);
-        var xml = XDocument.Load(metadataPath);
-        Assert.Equal("CCreatureMetaData", xml.Root?.Name.LocalName);
-        AssertValueAttributesAreHex(xml);
-        Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
-        Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
+        Assert.Empty(analyze.Plan.CreatureMetadataOutputs);
+        Assert.False(File.Exists(metadataPath));
+        Assert.DoesNotContain(build.WrittenFiles, file => file.EndsWith("MP_CreatureMetadata_merged_f_001.ymt", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

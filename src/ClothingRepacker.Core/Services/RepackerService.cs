@@ -1706,7 +1706,7 @@ public sealed class RepackerService
             var hasRepairHints = targetPlan.SourceYmts
                 .Select(sourcePath => sourceYmts.FirstOrDefault(source => source.Path.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)))
                 .Any(source => source?.HasCreatureRepairHints == true);
-            if (targetBindings.Count == 0 && !hasRepairHints && sourceBindings.Count > 0)
+            if (targetBindings.Count == 0 && !hasRepairHints)
             {
                 continue;
             }
@@ -1771,11 +1771,6 @@ public sealed class RepackerService
 
     private static bool HasCreatureMetadataContent(MergePlan plan, TargetCollectionPlan targetPlan)
     {
-        if (plan.SourceCreatureMetadata.Count == 0)
-        {
-            return true;
-        }
-
         var sourcePaths = targetPlan.SourceYmts.ToHashSet(StringComparer.OrdinalIgnoreCase);
         return plan.SourceCreatureMetadata.Any(metadata =>
                    metadata.SourceYmts.Any(sourcePath => sourcePaths.Contains(sourcePath)))

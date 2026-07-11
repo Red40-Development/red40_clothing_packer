@@ -32,7 +32,7 @@ public class ShopMetaGenerationTests
         Assert.Equal("merged_f_001", xml.Root?.Element("dlcName")?.Value.Trim());
         Assert.Equal("mp_f_freemode_01_merged_f_001", xml.Root?.Element("fullDlcName")?.Value.Trim());
         Assert.Equal("SCR_CHAR_MULTIPLAYER_F", xml.Root?.Element("eCharacter")?.Value.Trim());
-        Assert.Equal("MP_CreatureMetadata_merged_f_001", xml.Root?.Element("creatureMetaData")?.Value.Trim());
+        Assert.Null(xml.Root?.Element("creatureMetaData"));
         Assert.NotNull(xml.Root?.Element("pedOutfits"));
         Assert.Empty(xml.Root!.Element("pedComponents")!.Elements("Item"));
         Assert.Empty(xml.Root!.Element("pedProps")!.Elements("Item"));
@@ -96,7 +96,7 @@ public class ShopMetaGenerationTests
         var metaPath = Path.Combine(outputRoot, "zz_merged_clothing_meta", "data", "mp_f_freemode_01_merged_f_001.meta");
         var xml = XDocument.Load(metaPath);
 
-        Assert.Equal("MP_CreatureMetadata_merged_f_001", xml.Root?.Element("creatureMetaData")?.Value.Trim());
+        Assert.Null(xml.Root?.Element("creatureMetaData"));
         var prop = Assert.Single(xml.Root!.Element("pedProps")!.Elements("Item"));
         var propComment = Assert.IsType<XComment>(prop.PreviousNode);
         Assert.Equal("Props: Glasses - mp_f_freemode_01_prop_pack^p_eyes_diff_000_a", propComment.Value.Trim());
