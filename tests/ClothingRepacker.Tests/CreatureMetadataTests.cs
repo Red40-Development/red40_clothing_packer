@@ -245,13 +245,33 @@ public class CreatureMetadataTests
             "zz_merged_clothing_meta",
             "stream",
             "MP_CreatureMetadata_merged_f_001.ymt.xml");
-        var xml = XDocument.Load(metadataPath);
-
         Assert.Empty(analyze.Plan.SourceCreatureMetadata);
+        var xml = XDocument.Load(metadataPath);
         Assert.Equal("CCreatureMetaData", xml.Root?.Name.LocalName);
         AssertValueAttributesAreHex(xml);
         Assert.Empty(xml.Root!.Element("pedCompExpressions")!.Elements("Item"));
         Assert.Empty(xml.Root!.Element("pedPropExpressions")!.Elements("Item"));
+    }
+
+    [Fact]
+    public async Task BuildDoesNotCreateCreatureMetadataForMetadataFreeTarget()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mixed-creature-metadata-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_a", componentExpressionIndex: 4, propExpressionIndex: 9);
+        WriteResource(resources, "pack_b", componentExpressionIndex: 8, propExpressionIndex: 10, includeCreatureMetadata: false);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 1,
+            MaxDrawablesPerProp = 1,
+        });
+
+        Assert.Equal(2, analyze.Plan.TargetCollections.Count);
+        Assert.Single(analyze.Plan.CreatureMetadataOutputs);
+        Assert.Single(analyze.Plan.CreatureMetadataOutputs[0].TargetCollections);
+        Assert.Equal("merged_f_001", analyze.Plan.CreatureMetadataOutputs[0].TargetCollections[0]);
     }
 
     [Fact]

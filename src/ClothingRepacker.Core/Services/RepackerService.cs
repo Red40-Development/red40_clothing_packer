@@ -265,7 +265,8 @@ public sealed class RepackerService
             source.FullCollectionName,
             source.DlcName,
             source.Components.ToDictionary(component => component.ComponentId, component => component.Drawables.Count),
-            source.Props.ToDictionary(prop => prop.AnchorId, prop => prop.Props.Count))).ToList();
+            source.Props.ToDictionary(prop => prop.AnchorId, prop => prop.Props.Count),
+            source.CreatureComponentRepairHints.Count > 0 || source.CreaturePropRepairHints.Count > 0)).ToList();
         var brokenCreatureMetadataBackups = brokenCreatureMetadata.Select(metadata => new BrokenCreatureMetadataBackupPlan(
             metadata.Path,
             Path.Combine(metadata.ResourceName, Path.GetRelativePath(metadata.ResourceRoot, metadata.Path)).Replace(Path.DirectorySeparatorChar, '/'))).ToList();
@@ -1671,6 +1672,14 @@ public sealed class RepackerService
                 .SelectMany(sourcePath => sourceBindingsByYmt[sourcePath])
                 .DistinctBy(binding => (binding.SourceYmtPath.ToUpperInvariant(), binding.SourceMetadataPath.ToUpperInvariant()))
                 .ToList();
+            var hasRepairHints = targetPlan.SourceYmts
+                .Select(sourcePath => sourceYmts.FirstOrDefault(source => source.Path.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)))
+                .Any(source => source?.HasCreatureRepairHints == true);
+            if (targetBindings.Count == 0 && !hasRepairHints && sourceBindings.Count > 0)
+            {
+                continue;
+            }
+
             var metadataKeyParts = targetBindings
                 .Select(binding => binding.SourceMetadataPath)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1720,12 +1729,27 @@ public sealed class RepackerService
 
         return plan.TargetCollections
             .Where(target => !TargetHasUnavailableCreatureMetadata(plan, target))
+            .Where(target => HasCreatureMetadataContent(plan, target))
             .Select(target => new CreatureMetadataOutputPlan(
                 $"MP_CreatureMetadata_{target.CollectionName}",
                 Path.Combine(plan.TargetResource, "stream", $"MP_CreatureMetadata_{target.CollectionName}.ymt").Replace(Path.DirectorySeparatorChar, '/'),
                 [target.CollectionName],
                 BuildLegacyCreatureMetadataBindings(plan, target)))
             .ToList();
+    }
+
+    private static bool HasCreatureMetadataContent(MergePlan plan, TargetCollectionPlan targetPlan)
+    {
+        if (plan.SourceCreatureMetadata.Count == 0)
+        {
+            return true;
+        }
+
+        var sourcePaths = targetPlan.SourceYmts.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return plan.SourceCreatureMetadata.Any(metadata =>
+                   metadata.SourceYmts.Any(sourcePath => sourcePaths.Contains(sourcePath)))
+               || plan.SourceYmts.Any(source =>
+                   sourcePaths.Contains(source.Path) && source.HasCreatureRepairHints);
     }
 
     private static List<CreatureMetadataSourceBinding> BuildLegacyCreatureMetadataBindings(MergePlan plan, TargetCollectionPlan targetPlan)

@@ -149,7 +149,8 @@ public sealed record SourceYmtSummary(
     string FullCollectionName,
     string DlcName,
     Dictionary<int, int> Components,
-    Dictionary<int, int> Props);
+    Dictionary<int, int> Props,
+    bool HasCreatureRepairHints = false);
 
 public sealed record SourceIndexRange(
     string SourceYmtPath,
