@@ -56,6 +56,32 @@ public class YmtRepackReportTests
         Assert.Contains("0-1", text);
     }
 
+    [Fact]
+    public void BuilderReportsCreatureMetadataSourcesAndTargetOutputs()
+    {
+        var report = new YmtRepackReportBuilder().Build(BuildReportPlan());
+
+        var source = Assert.Single(report.CreatureMetadataSources);
+        Assert.Equal("/tmp/meta.ymt", source.MetadataPath);
+        Assert.Equal(["/tmp/a.ymt"], source.SourceYmtPaths);
+
+        var target = Assert.Single(report.CreatureMetadataTargets);
+        Assert.True(target.IsRequired);
+        Assert.False(target.IsUnnecessaryOutput);
+        Assert.Equal("MP_CreatureMetadata_merged_f_001", target.OutputName);
+    }
+
+    [Fact]
+    public void FormatterIncludesCreatureMetadataDiagnostics()
+    {
+        var text = new YmtRepackReportFormatter().Format(YmtRepackReportWithUnnecessaryOutput());
+
+        Assert.Contains("Creature metadata sources", text);
+        Assert.Contains("Creature metadata targets", text);
+        Assert.Contains("UNNECESSARY OUTPUT", text);
+        Assert.Contains("source metadata: none", text);
+    }
+
     private static MergePlan BuildReportPlan()
         => new()
         {
@@ -69,6 +95,18 @@ public class YmtRepackReportTests
             [
                 new SourceYmtSummary("pack_a", "/tmp/a.ymt", "mp_f_freemode_01", PedGender.Female, "pack_a", "mp_f_freemode_01_pack_a", "hash_a", [], []),
                 new SourceYmtSummary("pack_b", "/tmp/b.ymt", "mp_f_freemode_01", PedGender.Female, "pack_b", "mp_f_freemode_01_pack_b", "hash_b", [], []),
+            ],
+            SourceCreatureMetadata =
+            [
+                new SourceCreatureMetadataSummary("pack_a", "/tmp/meta.ymt", 1, 2, 3, ["/tmp/a.ymt"]),
+            ],
+            CreatureMetadataOutputs =
+            [
+                new CreatureMetadataOutputPlan(
+                    "MP_CreatureMetadata_merged_f_001",
+                    "zz_merged_clothing_meta/stream/MP_CreatureMetadata_merged_f_001.ymt",
+                    ["merged_f_001"],
+                    [new CreatureMetadataSourceBinding("/tmp/a.ymt", "/tmp/meta.ymt")]),
             ],
             TargetCollections =
             [
@@ -96,4 +134,19 @@ public class YmtRepackReportTests
                 new PropMapping("pack_b", "/tmp/b.ymt", "pack_b", "mp_f_freemode_01_pack_b", "merged_f_001", "mp_f_freemode_01_merged_f_001", "mp_f_freemode_01", 0, 6, 1),
             ],
         };
+
+    private static YmtRepackReport YmtRepackReportWithUnnecessaryOutput()
+        => new(
+            [],
+            [],
+            [],
+            [new YmtRepackCreatureMetadataTarget(
+                "merged_f_001",
+                "mp_f_freemode_01_merged_f_001",
+                [],
+                [],
+                false,
+                false,
+                "MP_CreatureMetadata_merged_f_001",
+                "zz_merged_clothing_meta/stream/MP_CreatureMetadata_merged_f_001.ymt")]);
 }

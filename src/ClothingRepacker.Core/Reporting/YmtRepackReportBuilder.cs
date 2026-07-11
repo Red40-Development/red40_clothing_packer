@@ -17,8 +17,11 @@ public sealed class YmtRepackReportBuilder
             .ThenBy(source => source.YmtPath, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var orderedTargetPlans = plan.TargetCollections
+            .OrderBy(target => target.FullCollectionName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         var targets = new List<YmtRepackTarget>();
-        foreach (var target in plan.TargetCollections.OrderBy(target => target.FullCollectionName, StringComparer.OrdinalIgnoreCase))
+        foreach (var target in orderedTargetPlans)
         {
             var lanes = new List<YmtRepackLane>();
             lanes.AddRange(BuildComponentLanes(plan, target, sourceLookup));
@@ -32,7 +35,53 @@ public sealed class YmtRepackReportBuilder
                 lanes));
         }
 
-        return new YmtRepackReport(targets, sources);
+        var creatureMetadataSources = plan.SourceCreatureMetadata
+            .Select(metadata => new YmtRepackCreatureMetadataSource(
+                metadata.Resource,
+                metadata.Path,
+                metadata.ShaderVariableComponentCount,
+                metadata.ComponentExpressionCount,
+                metadata.PropExpressionCount,
+                metadata.SourceYmts))
+            .OrderBy(metadata => metadata.Resource, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(metadata => metadata.MetadataPath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var creatureMetadataTargets = orderedTargetPlans
+            .Select(target => BuildCreatureMetadataTarget(plan, target, creatureMetadataSources))
+            .ToList();
+
+        return new YmtRepackReport(targets, sources, creatureMetadataSources, creatureMetadataTargets);
+    }
+
+    private static YmtRepackCreatureMetadataTarget BuildCreatureMetadataTarget(
+        MergePlan plan,
+        TargetCollectionPlan target,
+        IReadOnlyList<YmtRepackCreatureMetadataSource> metadataSources)
+    {
+        var sourceYmtPaths = target.SourceYmts.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var targetMetadataSources = metadataSources
+            .Where(metadata => metadata.SourceYmtPaths.Any(sourceYmtPath => sourceYmtPaths.Contains(sourceYmtPath)))
+            .ToList();
+        var hasRepairHints = plan.SourceYmts
+            .Where(source => sourceYmtPaths.Contains(source.Path))
+            .Any(source => source.HasCreatureRepairHints);
+        var output = plan.CreatureMetadataOutputs
+            .FirstOrDefault(output => output.TargetCollections.Contains(target.CollectionName, StringComparer.OrdinalIgnoreCase));
+        var isRequired = targetMetadataSources.Count > 0 || hasRepairHints;
+
+        return new YmtRepackCreatureMetadataTarget(
+            target.CollectionName,
+            target.FullCollectionName,
+            targetMetadataSources.Select(metadata => metadata.MetadataPath).ToList(),
+            targetMetadataSources.SelectMany(metadata => metadata.SourceYmtPaths)
+                .Where(sourceYmtPath => sourceYmtPaths.Contains(sourceYmtPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(sourceYmtPath => sourceYmtPath, StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            hasRepairHints,
+            isRequired,
+            output?.Name,
+            output?.OutputYmtPath);
     }
 
     private static IEnumerable<YmtRepackLane> BuildComponentLanes(

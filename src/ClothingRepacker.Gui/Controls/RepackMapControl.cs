@@ -21,10 +21,14 @@ public sealed class RepackMapControl : Control
     private const double TargetGap = 16;
     private const double LegendRowHeight = 18;
     private const double LegendColumnWidth = 360;
+    private const double MetadataRowHeight = 34;
 
     private static readonly IBrush BackgroundBrush = Brush.Parse("#F8FAFC");
     private static readonly IBrush TextBrush = Brush.Parse("#1A202C");
     private static readonly IBrush MutedTextBrush = Brush.Parse("#4A5568");
+    private static readonly IBrush RequiredMetadataBrush = Brush.Parse("#2F855A");
+    private static readonly IBrush UnnecessaryMetadataBrush = Brush.Parse("#C53030");
+    private static readonly IBrush MissingMetadataBrush = Brush.Parse("#B7791F");
     private static readonly IBrush LaneBackgroundBrush = Brush.Parse("#EDF2F7");
     private static readonly IBrush FreeBrush = Brush.Parse("#E2E8F0");
     private static readonly IPen LaneBorderPen = new Pen(Brush.Parse("#CBD5E0"), 1);
@@ -86,7 +90,7 @@ public sealed class RepackMapControl : Control
         var bounds = new Rect(Bounds.Size);
         context.FillRectangle(BackgroundBrush, bounds);
 
-        if (Report is not { Targets.Count: > 0 } report)
+        if (Report is not { } report || (report.Targets.Count == 0 && report.CreatureMetadataTargets.Count == 0))
         {
             DrawText(context, "Analyze resources to see the YMT repack map.", new Point(MarginSize, MarginSize), 13, MutedTextBrush);
             return;
@@ -131,6 +135,8 @@ public sealed class RepackMapControl : Control
 
             y += TargetGap;
         }
+
+        y = DrawCreatureMetadata(context, report, y);
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -165,7 +171,10 @@ public sealed class RepackMapControl : Control
 
         var legendRows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / 2.0));
         var targetHeight = report.Targets.Sum(target => TargetHeaderHeight + target.Lanes.Count * (LaneHeight + LaneGap) + TargetGap);
-        return MarginSize * 2 + TargetHeaderHeight + legendRows * LegendRowHeight + TargetGap + targetHeight;
+        var metadataHeight = report.CreatureMetadataTargets.Count == 0
+            ? 0
+            : TargetHeaderHeight + report.CreatureMetadataTargets.Count * MetadataRowHeight + TargetGap;
+        return MarginSize * 2 + TargetHeaderHeight + legendRows * LegendRowHeight + TargetGap + targetHeight + metadataHeight;
     }
 
     private static double DrawLegend(
@@ -194,6 +203,56 @@ public sealed class RepackMapControl : Control
 
         var rows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / (double)columns));
         return y + rows * LegendRowHeight + TargetGap;
+    }
+
+    private static double DrawCreatureMetadata(DrawingContext context, YmtRepackReport report, double y)
+    {
+        if (report.CreatureMetadataTargets.Count == 0)
+        {
+            return y;
+        }
+
+        DrawText(context, "Creature metadata", new Point(MarginSize, y), 13, TextBrush);
+        y += TargetHeaderHeight;
+        foreach (var target in report.CreatureMetadataTargets)
+        {
+            var status = target.IsUnnecessaryOutput
+                ? "UNNECESSARY OUTPUT"
+                : target.IsMissingOutput
+                    ? "MISSING OUTPUT"
+                    : target.IsRequired
+                        ? "required"
+                        : "not required";
+            var brush = target.IsUnnecessaryOutput
+                ? UnnecessaryMetadataBrush
+                : target.IsMissingOutput
+                    ? MissingMetadataBrush
+                    : target.IsRequired
+                        ? RequiredMetadataBrush
+                        : MutedTextBrush;
+            var output = target.OutputName is null ? "no output" : target.OutputName;
+            var source = target.SourceMetadataPaths.Count == 0
+                ? "no source metadata"
+                : $"{target.SourceMetadataPaths.Count} source metadata file(s)";
+            var sourceYmts = target.SourceYmtPaths.Count == 0
+                ? string.Empty
+                : $" | YMTs: {string.Join(", ", target.SourceYmtPaths.Select(Path.GetFileName))}";
+            var repair = target.HasRepairHints ? " + repair hints" : string.Empty;
+            DrawText(
+                context,
+                $"{target.TargetFullCollection}  {status}  |  {output}  |  {source}{sourceYmts}{repair}",
+                new Point(MarginSize, y),
+                12,
+                brush);
+            if (!string.IsNullOrWhiteSpace(target.OutputYmtPath))
+            {
+                DrawText(context, $"Output: {target.OutputYmtPath}", new Point(MarginSize + 18, y + 15), 10, MutedTextBrush);
+            }
+
+            y += MetadataRowHeight;
+        }
+
+        return y + TargetGap;
     }
 
     private static Rect SegmentRect(Rect laneRect, YmtRepackSegment segment, int capacity)

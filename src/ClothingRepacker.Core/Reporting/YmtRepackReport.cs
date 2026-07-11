@@ -10,7 +10,9 @@ public enum YmtRepackLaneKind
 
 public sealed record YmtRepackReport(
     IReadOnlyList<YmtRepackTarget> Targets,
-    IReadOnlyList<YmtRepackSource> Sources)
+    IReadOnlyList<YmtRepackSource> Sources,
+    IReadOnlyList<YmtRepackCreatureMetadataSource> CreatureMetadataSources,
+    IReadOnlyList<YmtRepackCreatureMetadataTarget> CreatureMetadataTargets)
 {
     public int SegmentCount => Targets.SelectMany(target => target.Lanes).SelectMany(lane => lane.UsedSegments).Count();
 }
@@ -20,6 +22,29 @@ public sealed record YmtRepackSource(
     string YmtPath,
     string CollectionName,
     string FullCollectionName);
+
+public sealed record YmtRepackCreatureMetadataSource(
+    string Resource,
+    string MetadataPath,
+    int ShaderVariableComponentCount,
+    int ComponentExpressionCount,
+    int PropExpressionCount,
+    IReadOnlyList<string> SourceYmtPaths);
+
+public sealed record YmtRepackCreatureMetadataTarget(
+    string TargetCollection,
+    string TargetFullCollection,
+    IReadOnlyList<string> SourceMetadataPaths,
+    IReadOnlyList<string> SourceYmtPaths,
+    bool HasRepairHints,
+    bool IsRequired,
+    string? OutputName,
+    string? OutputYmtPath)
+{
+    public bool HasOutput => !string.IsNullOrWhiteSpace(OutputName);
+    public bool IsUnnecessaryOutput => HasOutput && !IsRequired;
+    public bool IsMissingOutput => IsRequired && !HasOutput;
+}
 
 public sealed record YmtRepackTarget(
     string CollectionName,

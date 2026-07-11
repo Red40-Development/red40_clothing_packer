@@ -450,7 +450,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    public bool HasRepackReport => _repackReport is { SegmentCount: > 0 };
+    public bool HasRepackReport => _repackReport is { } report
+        && (report.SegmentCount > 0 || report.CreatureMetadataTargets.Count > 0);
 
     public bool HasRestoreManifestPreview => _restorePreview is not null;
 
