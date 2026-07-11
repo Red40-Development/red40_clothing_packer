@@ -703,6 +703,9 @@ public sealed class RepackerService
         var runId = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHHmmssZ");
         var backupDir = Path.Combine(Path.GetFullPath(backupRoot), runId);
         Directory.CreateDirectory(backupDir);
+        var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
+        var entries = new List<BackupEntry>();
+        await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
 
         var stagingRoot = Path.Combine(Path.GetTempPath(), $"clothing-repacker-{Guid.NewGuid():N}");
         progress?.Report(new OperationProgress(
@@ -714,7 +717,6 @@ public sealed class RepackerService
             IncludeYmtXml = options.IncludeYmtXml,
             IncludeDebugClient = options.IncludeDebugClient,
         }, progress, cancellationToken);
-        var entries = new List<BackupEntry>();
         var renameMap = options.CopyResourcesToOutputBeforeRename
             ? plan.StreamRenames.ToDictionary(rename => rename.SourcePath, rename => rename.TargetPath, StringComparer.OrdinalIgnoreCase)
             : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -735,6 +737,7 @@ public sealed class RepackerService
             foreach (var sourceRoot in GetKnownResourceRoots(plan))
             {
                 SanitizeResourceManifest(sourceRoot, entries, backupDir);
+                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
             }
         }
 
@@ -767,8 +770,12 @@ public sealed class RepackerService
 
             var beforeHash = ComputeSha256(sourcePath);
             Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+            var renameEntry = new BackupEntry("stream-rename", sourcePath, null, targetPath, beforeHash, null, DateTimeOffset.UtcNow);
+            entries.Add(renameEntry);
+            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
             File.Move(sourcePath, targetPath);
-            entries.Add(new BackupEntry("stream-rename", sourcePath, null, targetPath, beforeHash, ComputeSha256(targetPath), DateTimeOffset.UtcNow));
+            entries[^1] = renameEntry with { Sha256After = ComputeSha256(targetPath) };
+            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
 
             progress?.Report(new OperationProgress(
                 "apply",
@@ -803,8 +810,9 @@ public sealed class RepackerService
                 Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
                 File.Copy(sourcePath, backupPath, overwrite: true);
                 var beforeHash = ComputeSha256(sourcePath);
-                File.Delete(sourcePath);
                 entries.Add(new BackupEntry("old-ymt", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
+                File.Delete(sourcePath);
             }
 
             progress?.Report(new OperationProgress(
@@ -831,8 +839,9 @@ public sealed class RepackerService
             Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
             File.Copy(sourcePath, backupPath, overwrite: true);
             var beforeHash = ComputeSha256(sourcePath);
-            File.Delete(sourcePath);
             entries.Add(new BackupEntry("broken-creature-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
+            File.Delete(sourcePath);
 
             progress?.Report(new OperationProgress(
                 "apply",
@@ -863,8 +872,9 @@ public sealed class RepackerService
                 Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
                 File.Copy(sourcePath, backupPath, overwrite: true);
                 var beforeHash = ComputeSha256(sourcePath);
-                File.Delete(sourcePath);
                 entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
+                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
+                File.Delete(sourcePath);
             }
 
             var metadataIndex = mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count + index + 1;
@@ -884,6 +894,8 @@ public sealed class RepackerService
             var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
             var generatedRootIsCopiedSourceResource = resourceRootsToCopy.Any(resourceRoot =>
                 PathsEqual(GetResourceCopyDestination(resourceRoot, generatedResourcesRoot), generatedRoot));
+            entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
+            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
             if (Directory.Exists(generatedRoot))
             {
                 if (generatedRootIsCopiedSourceResource)
@@ -903,7 +915,6 @@ public sealed class RepackerService
                 "apply",
                 "copy-generated-file",
                 cancellationToken);
-            entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
         }
 
         progress?.Report(new OperationProgress(
@@ -916,9 +927,6 @@ public sealed class RepackerService
             BackupCount: entries.Count(IsSourceBackupEntry),
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
-        var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
-        await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(entries, _jsonOptions), cancellationToken);
-
         progress?.Report(new OperationProgress(
             "apply",
             "complete",
@@ -930,6 +938,29 @@ public sealed class RepackerService
             WrittenFileCount: buildResult.WrittenFiles.Count));
 
         return entries;
+    }
+
+    private async Task WriteBackupManifestAsync(
+        string manifestPath,
+        IReadOnlyList<BackupEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        var temporaryPath = $"{manifestPath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(
+                temporaryPath,
+                JsonSerializer.Serialize(entries, _jsonOptions),
+                cancellationToken);
+            File.Move(temporaryPath, manifestPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
     }
 
     private static string GetGeneratedResourcesRoot(MergePlan plan)
