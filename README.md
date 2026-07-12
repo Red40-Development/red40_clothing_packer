@@ -84,6 +84,16 @@ ClothingRepacker.Cli export-xml --folder <path> [--overwrite]
 
 By default, the CLI checks the latest GitHub release when a command starts and prints a notice if a newer version is available. Add `--no-version-check` to any command, or set `RED40_NO_VERSION_CHECK=1`, to skip the check.
 
+## Reproducible releases
+
+Release publishing enables deterministic .NET compilation, deterministic source paths, and CI build metadata. The release workflow also publishes every target twice and compares SHA-256 hashes for all generated files. A mismatch fails the workflow before the release assets are collected.
+
+To run the same check locally after restoring the solution, use:
+
+```sh
+python3 scripts/verify-reproducible-build.py
+```
+
 ### How to use
 
 Assume your clothing resources live in the same directory as the executable.
