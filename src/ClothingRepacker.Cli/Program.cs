@@ -4,6 +4,7 @@ using ClothingRepacker.Core.Reporting;
 using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core;
 using ClothingRepacker.CodeWalker;
+using ClothingRepacker.Core.Localization;
 using System.Reflection;
 
 var exitCode = await ProgramEntry.RunAsync(args);
@@ -13,13 +14,14 @@ public static class ProgramEntry
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        var localization = new LocalizationService();
         var normalizedArgs = args.ToList();
         var skipVersionCheck = normalizedArgs.RemoveAll(arg =>
             string.Equals(arg, "--no-version-check", StringComparison.OrdinalIgnoreCase)) > 0;
 
         if (normalizedArgs.Count == 0 || normalizedArgs[0] is "--help" or "-h" or "help")
         {
-            PrintHelp();
+            PrintHelp(localization);
             return 0;
         }
 
@@ -30,7 +32,7 @@ public static class ProgramEntry
             options.Add("--no-version-check", null);
         }
 
-        await CheckForUpdatesAsync(options);
+        await CheckForUpdatesAsync(options, localization);
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
 
         try
@@ -38,22 +40,22 @@ public static class ProgramEntry
             switch (command)
             {
                 case "analyze":
-                    return await RunAnalyzeAsync(service, options);
+                    return await RunAnalyzeAsync(service, options, localization);
                 case "build":
-                    return await RunBuildAsync(service, options);
+                    return await RunBuildAsync(service, options, localization);
                 case "apply":
-                    return await RunApplyAsync(service, options);
+                    return await RunApplyAsync(service, options, localization);
                 case "restore":
-                    return await RunRestoreAsync(service, options);
+                    return await RunRestoreAsync(service, options, localization);
                 case "validate":
-                    return await RunValidateAsync(service, options);
+                    return await RunValidateAsync(service, options, localization);
                 case "report":
-                    return await RunReportAsync(service, options);
+                    return await RunReportAsync(service, options, localization);
                 case "export-xml":
-                    return await RunExportXmlAsync(service, options);
+                    return await RunExportXmlAsync(service, options, localization);
                 default:
-                    Console.Error.WriteLine($"Unknown command '{command}'.");
-                    PrintHelp();
+                    Console.Error.WriteLine(T(localization, "cli.unknownCommand", new Dictionary<string, object?> { ["command"] = command }));
+                    PrintHelp(localization);
                     return 1;
             }
         }
@@ -64,12 +66,12 @@ public static class ProgramEntry
         }
     }
 
-    private static async Task<int> RunAnalyzeAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunAnalyzeAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        using var progressWriter = new ConsoleProgressWriter();
+        using var progressWriter = new ConsoleProgressWriter(localization);
         var targetResource = options.GetValueOrDefault("--target-resource") ?? "zz_merged_clothing_meta";
         var targetPrefix = options.GetValueOrDefault("--target-prefix") ?? "merged";
-        var outPath = Required(options, "--out");
+        var outPath = Required(options, "--out", localization);
         var legacyMaxDrawablesPerType = ParseNullableInt(options.GetValueOrDefault("--max-drawables-per-type"));
         var settings = new MergePlanSettings
         {
@@ -85,71 +87,71 @@ public static class ProgramEntry
             OptimizeYmtUsage = options.ContainsKey("--optimize-ymt-usage"),
         };
 
-        var result = await AnalyzeWithOptionsAsync(service, options, targetResource, settings, CreateConsoleProgress(progressWriter));
+        var result = await AnalyzeWithOptionsAsync(service, options, targetResource, settings, CreateConsoleProgress(progressWriter, localization), localization);
         progressWriter.CompleteLine();
         await service.SavePlanAsync(result.Plan, outPath);
-        Console.WriteLine($"Analyzed {result.Plan.SourceYmts.Count} YMTs into {result.Plan.TargetCollections.Count} target collections.");
-        Console.WriteLine($"Warnings: {result.Plan.Warnings.Count}. Errors: {result.Plan.Errors.Count}. Planned stream renames: {result.Plan.StreamRenames.Count}.");
-        foreach (var warning in result.Plan.Warnings)
+        Console.WriteLine(T(localization, "cli.analyzed", new Dictionary<string, object?> { ["sources"] = result.Plan.SourceYmts.Count, ["targets"] = result.Plan.TargetCollections.Count }));
+        Console.WriteLine(T(localization, "cli.counts", new Dictionary<string, object?> { ["warnings"] = result.Plan.Warnings.Count, ["errors"] = result.Plan.Errors.Count, ["renames"] = result.Plan.StreamRenames.Count }));
+        foreach (var warning in DiagnosticTexts(localization, result.Plan.WarningDiagnostics, result.Plan.Warnings))
         {
             Console.Error.WriteLine(warning);
         }
 
         if (result.Plan.Errors.Count > 0)
         {
-            foreach (var error in result.Plan.Errors)
+            foreach (var error in DiagnosticTexts(localization, result.Plan.ErrorDiagnostics, result.Plan.Errors))
             {
                 Console.Error.WriteLine(error);
             }
 
-            Console.WriteLine($"Plan contains {result.Plan.Errors.Count} error(s).");
+            Console.WriteLine(T(localization, "cli.planErrors", new Dictionary<string, object?> { ["count"] = result.Plan.Errors.Count }));
             return 1;
         }
 
         return 0;
     }
 
-    private static async Task<int> RunBuildAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunBuildAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        using var progressWriter = new ConsoleProgressWriter();
-        var plan = await service.LoadPlanAsync(Required(options, "--plan"));
+        using var progressWriter = new ConsoleProgressWriter(localization);
+        var plan = await service.LoadPlanAsync(Required(options, "--plan", localization));
         var buildOptions = new BuildOptions
         {
             IncludeYmtXml = ParseBool(options.GetValueOrDefault("--include-ymt-xml"), fallback: true),
             IncludeDebugClient = ParseBool(options.GetValueOrDefault("--include-debug-client"), fallback: true),
         };
-        var result = await service.BuildAsync(plan, Required(options, "--out"), buildOptions, CreateConsoleProgress(progressWriter));
+        var result = await service.BuildAsync(plan, Required(options, "--out", localization), buildOptions, CreateConsoleProgress(progressWriter, localization));
         progressWriter.CompleteLine();
-        Console.WriteLine($"Wrote {result.WrittenFiles.Count} file(s) to {result.OutputRoot}.");
+        Console.WriteLine(T(localization, "cli.wroteFiles", new Dictionary<string, object?> { ["count"] = result.WrittenFiles.Count, ["path"] = result.OutputRoot }));
         return 0;
     }
 
-    private static async Task<int> RunApplyAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunApplyAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        using var progressWriter = new ConsoleProgressWriter();
-        var plan = await service.LoadPlanAsync(Required(options, "--plan"));
+        using var progressWriter = new ConsoleProgressWriter(localization);
+        var plan = await service.LoadPlanAsync(Required(options, "--plan", localization));
         var applyOptions = new ApplyOptions
         {
             CopyResourcesToOutputBeforeRename = options.ContainsKey("--copy-resources-to-output") || !plan.Settings.RenameStreamsInPlace,
             IncludeYmtXml = ParseBool(options.GetValueOrDefault("--include-ymt-xml"), fallback: true),
             IncludeDebugClient = ParseBool(options.GetValueOrDefault("--include-debug-client"), fallback: true),
         };
-        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root"), applyOptions, CreateConsoleProgress(progressWriter));
+        var entries = await service.ApplyAsync(plan, Required(options, "--backup-root", localization), applyOptions, CreateConsoleProgress(progressWriter, localization));
         progressWriter.CompleteLine();
-        Console.WriteLine($"Applied plan with {entries.Count} backup entries.");
+        Console.WriteLine(T(localization, "cli.applied", new Dictionary<string, object?> { ["count"] = entries.Count }));
         return 0;
     }
 
-    private static async Task<int> RunRestoreAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunRestoreAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        using var progressWriter = new ConsoleProgressWriter();
-        await service.RestoreAsync(Required(options, "--backup-manifest"), CreateConsoleProgress(progressWriter));
+        using var progressWriter = new ConsoleProgressWriter(localization);
+        await service.RestoreAsync(Required(options, "--backup-manifest", localization), CreateConsoleProgress(progressWriter, localization));
         progressWriter.CompleteLine();
-        Console.WriteLine("Restore complete.");
+        Console.WriteLine(T(localization, "cli.restoreComplete"));
         return 0;
     }
 
-    private static async Task<int> RunValidateAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunValidateAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
         if (options.TryGetValue("--plan", out var planPath) && !string.IsNullOrWhiteSpace(planPath))
         {
@@ -160,32 +162,32 @@ public static class ProgramEntry
                 Console.Error.WriteLine(error);
             }
 
-            Console.WriteLine(errors.Count == 0 ? "Plan is valid." : $"Plan has {errors.Count} error(s).");
+            Console.WriteLine(errors.Count == 0 ? T(localization, "cli.planValid") : T(localization, "cli.planHasErrors", new Dictionary<string, object?> { ["count"] = errors.Count }));
             return errors.Count == 0 ? 0 : 1;
         }
 
         if (options.ContainsKey("--resources") || options.GetValues("--resource").Count > 0)
         {
-            using var progressWriter = new ConsoleProgressWriter();
-            var result = await AnalyzeWithOptionsAsync(service, options, "zz_merged_clothing_meta", new MergePlanSettings(), CreateConsoleProgress(progressWriter));
+            using var progressWriter = new ConsoleProgressWriter(localization);
+            var result = await AnalyzeWithOptionsAsync(service, options, "zz_merged_clothing_meta", new MergePlanSettings(), CreateConsoleProgress(progressWriter, localization), localization);
             progressWriter.CompleteLine();
-            foreach (var error in result.Plan.Errors)
+            foreach (var error in DiagnosticTexts(localization, result.Plan.ErrorDiagnostics, result.Plan.Errors))
             {
                 Console.Error.WriteLine(error);
             }
 
-            Console.WriteLine(result.Plan.Errors.Count == 0 ? "Resources validated." : $"Resources have {result.Plan.Errors.Count} error(s).");
+            Console.WriteLine(result.Plan.Errors.Count == 0 ? T(localization, "cli.resourcesValid") : T(localization, "cli.resourcesHaveErrors", new Dictionary<string, object?> { ["count"] = result.Plan.Errors.Count }));
             return result.Plan.Errors.Count == 0 ? 0 : 1;
         }
 
-        throw new InvalidOperationException("validate requires --plan, --resources, or at least one --resource.");
+        throw new InvalidOperationException(T(localization, "cli.validateRequires"));
     }
 
-    private static async Task<int> RunReportAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunReportAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        var plan = await service.LoadPlanAsync(Required(options, "--plan"));
+        var plan = await service.LoadPlanAsync(Required(options, "--plan", localization));
         var report = new YmtRepackReportBuilder().Build(plan);
-        var text = new YmtRepackReportFormatter().Format(report);
+        var text = new YmtRepackReportFormatter(localization).Format(report);
         if (options.TryGetValue("--out", out var outPath) && !string.IsNullOrWhiteSpace(outPath))
         {
             var directory = Path.GetDirectoryName(outPath);
@@ -195,7 +197,7 @@ public static class ProgramEntry
             }
 
             await File.WriteAllTextAsync(outPath, text + Environment.NewLine);
-            Console.WriteLine($"Wrote YMT repack report to {outPath}.");
+            Console.WriteLine(T(localization, "cli.reportWritten", new Dictionary<string, object?> { ["path"] = outPath }));
             return 0;
         }
 
@@ -203,28 +205,28 @@ public static class ProgramEntry
         return 0;
     }
 
-    private static async Task<int> RunExportXmlAsync(RepackerService service, CliOptions options)
+    private static async Task<int> RunExportXmlAsync(RepackerService service, CliOptions options, LocalizationService localization)
     {
-        using var progressWriter = new ConsoleProgressWriter();
-        var folder = Required(options, "--folder");
-        var result = await service.ExportYmtsToXmlAsync(folder, options.ContainsKey("--overwrite"), CreateConsoleProgress(progressWriter));
+        using var progressWriter = new ConsoleProgressWriter(localization);
+        var folder = Required(options, "--folder", localization);
+        var result = await service.ExportYmtsToXmlAsync(folder, options.ContainsKey("--overwrite"), CreateConsoleProgress(progressWriter, localization));
         progressWriter.CompleteLine();
-        Console.WriteLine($"Exported {result.WrittenFiles.Count} YMT XML file(s).");
+        Console.WriteLine(T(localization, "cli.exportedXml", new Dictionary<string, object?> { ["count"] = result.WrittenFiles.Count }));
         if (result.SkippedFiles.Count > 0)
         {
-            Console.WriteLine($"Skipped {result.SkippedFiles.Count} existing XML file(s).");
+            Console.WriteLine(T(localization, "cli.skippedXml", new Dictionary<string, object?> { ["count"] = result.SkippedFiles.Count }));
         }
 
         return 0;
     }
 
-    private static Task<AnalyzeResult> AnalyzeWithOptionsAsync(RepackerService service, CliOptions options, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress)
+    private static Task<AnalyzeResult> AnalyzeWithOptionsAsync(RepackerService service, CliOptions options, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress, LocalizationService localization)
     {
         var resources = options.GetValueOrDefault("--resources");
         var resourceFolders = options.GetValues("--resource");
         if (!string.IsNullOrWhiteSpace(resources) && resourceFolders.Count > 0)
         {
-            throw new InvalidOperationException("Use either --resources <parent> or repeated --resource <folder>, not both.");
+            throw new InvalidOperationException(T(localization, "cli.resourcesModeConflict"));
         }
 
         if (resourceFolders.Count > 0)
@@ -232,7 +234,7 @@ public static class ProgramEntry
             var generatedRoot = options.GetValueOrDefault("--generated-root");
             if (string.IsNullOrWhiteSpace(generatedRoot))
             {
-                throw new InvalidOperationException("--generated-root is required when using --resource.");
+                throw new InvalidOperationException(T(localization, "cli.generatedRootRequired"));
             }
 
             return service.AnalyzeAsync(resourceFolders, generatedRoot, targetResource, settings, progress);
@@ -243,12 +245,61 @@ public static class ProgramEntry
             return service.AnalyzeAsync(resources, targetResource, settings, progress);
         }
 
-        throw new InvalidOperationException("Missing required option --resources or --resource.");
+        throw new InvalidOperationException(T(localization, "cli.resourcesRequired"));
     }
 
-    private static void PrintHelp()
+    private static void PrintHelp(LocalizationService localization)
     {
-        Console.WriteLine("""
+        Console.WriteLine(T(localization, "cli.help"));
+    }
+
+    private static async Task CheckForUpdatesAsync(CliOptions options, LocalizationService localization)
+    {
+        if (options.ContainsKey("--no-version-check") ||
+            string.Equals(Environment.GetEnvironmentVariable("RED40_NO_VERSION_CHECK"), "1", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var httpClient = new HttpClient();
+            var checker = new GitHubVersionChecker(httpClient, "Red40-Development", "red40_clothing_packer");
+            var currentVersion = AppVersion.FromInformationalVersion(
+                typeof(ProgramEntry).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+            var result = await checker.CheckAsync(currentVersion, cts.Token);
+            if (result is not null && result.IsUpdateAvailable)
+            {
+                Console.Error.WriteLine(T(localization, "cli.updateAvailable", new Dictionary<string, object?>
+                {
+                    ["latest"] = result.LatestVersion.Display,
+                    ["current"] = result.CurrentVersion.Display,
+                    ["url"] = result.ReleaseUrl,
+                }));
+            }
+        }
+        catch
+        {
+            // A failed update check should never block the requested CLI operation.
+        }
+    }
+
+    private static string Required(CliOptions options, string name, LocalizationService localization)
+        => options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : throw new InvalidOperationException(T(localization, "cli.missingOption", new Dictionary<string, object?> { ["option"] = name }));
+
+    private static string T(LocalizationService localization, string key, IReadOnlyDictionary<string, object?>? arguments = null)
+        => localization.Translate(key, arguments);
+
+    private static IEnumerable<string> DiagnosticTexts(
+        LocalizationService localization,
+        IReadOnlyList<LocalizedDiagnostic> diagnostics,
+        IReadOnlyList<string> legacy)
+        => diagnostics.Count > 0 ? diagnostics.Select(localization.Translate) : legacy;
+
+    /*
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
 clothing-repacker analyze --resource <path> [--resource <path> ...] --generated-root <folder> --target-resource <name> --out <plan.json>
   [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
@@ -276,36 +327,7 @@ Analyze options:
   --optimize-ymt-usage
                        Split source YMT lanes across target collections when it
                        can reduce the total number of generated YMTs.
-""");
-    }
-
-    private static async Task CheckForUpdatesAsync(CliOptions options)
-    {
-        if (options.ContainsKey("--no-version-check") ||
-            string.Equals(Environment.GetEnvironmentVariable("RED40_NO_VERSION_CHECK"), "1", StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        try
-        {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            using var httpClient = new HttpClient();
-            var checker = new GitHubVersionChecker(httpClient, "Red40-Development", "red40_clothing_packer");
-            var currentVersion = AppVersion.FromInformationalVersion(
-                typeof(ProgramEntry).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
-            var result = await checker.CheckAsync(currentVersion, cts.Token);
-            if (result is not null && result.IsUpdateAvailable)
-            {
-                Console.Error.WriteLine(
-                    $"Update available: {result.LatestVersion.Display} is newer than {result.CurrentVersion.Display}. Download: {result.ReleaseUrl}");
-            }
-        }
-        catch
-        {
-            // A failed update check should never block the requested CLI operation.
-        }
-    }
+    */
 
     public static CliOptions ParseOptions(string[] args)
     {
@@ -332,11 +354,6 @@ Analyze options:
         return options;
     }
 
-    private static string Required(CliOptions options, string name)
-        => options.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
-            ? value
-            : throw new InvalidOperationException($"Missing required option {name}.");
-
     private static int ParseInt(string? value, int fallback)
         => int.TryParse(value, out var parsed) ? parsed : fallback;
 
@@ -346,56 +363,62 @@ Analyze options:
     private static bool ParseBool(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
 
-    private static IProgress<OperationProgress> CreateConsoleProgress(ConsoleProgressWriter writer)
-        => new Progress<OperationProgress>(progress => writer.Write(FormatProgress(progress)));
+    private static IProgress<OperationProgress> CreateConsoleProgress(ConsoleProgressWriter writer, LocalizationService localization)
+        => new Progress<OperationProgress>(progress => writer.Write(FormatProgress(progress, localization)));
 
-    private static string FormatProgress(OperationProgress progress)
+    private static string FormatProgress(OperationProgress progress, LocalizationService localization)
     {
         var prefix = $"[{progress.Operation}]";
         var progressBar = progress.Total > 0 ? $" {BuildBar(progress.Current, progress.Total)} {progress.Current}/{progress.Total}" : string.Empty;
         var path = string.IsNullOrWhiteSpace(progress.Path) ? string.Empty : $" | {Path.GetFileName(progress.Path)}";
+        var message = progress.MessageKey is { } key
+            ? T(localization, key, progress.MessageArguments)
+            : progress.Message;
 
         return progress.Stage switch
         {
-            "start" => $"{prefix} {progress.Message}",
-            "process-source" => $"{prefix}{progressBar} files | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
-            "plan-targets" => $"{prefix} Planning target collections | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}",
-            "build-plan" => $"{prefix}{progressBar} targets | planned {progress.TargetCount}{path}",
-            "finalize-plan" => $"{prefix}{progressBar} finalizing merge plan | targets {progress.TargetCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}",
-            "load-source" => $"{prefix}{progressBar} source YMTs loading{path}",
-            "build-target" => $"{prefix}{progressBar} target collections building{path}",
-            "build-creature-metadata" => $"{prefix}{progressBar} creature metadata building{path}",
-            "write-target" => $"{prefix}{progressBar} target collections built | files written {progress.WrittenFileCount}{path}",
-            "export-file" => $"{prefix}{progressBar} files | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
-            "build-staging" => $"{prefix} {progress.Message}",
+            "start" => $"{prefix} {message ?? T(localization, "progress.started", new Dictionary<string, object?> { ["operation"] = progress.Operation })}",
+            "process-source" => $"{prefix}{progressBar} {T(localization, "progress.processedSources", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["sources"] = progress.SourceCount, ["warnings"] = progress.WarningCount, ["errors"] = progress.ErrorCount, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "plan-targets" => $"{prefix} {message ?? T(localization, "progress.planningTargets", new Dictionary<string, object?> { ["sources"] = progress.SourceCount, ["warnings"] = progress.WarningCount, ["errors"] = progress.ErrorCount })}",
+            "build-plan" => $"{prefix}{progressBar} {T(localization, "progress.plannedTargets", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "finalize-plan" => $"{prefix}{progressBar} {message ?? T(localization, "progress.finalizing")} | targets {progress.TargetCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}",
+            "load-source" => $"{prefix}{progressBar} {T(localization, "progress.loadingSource", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "build-target" => $"{prefix}{progressBar} {T(localization, "progress.buildingTarget", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "build-creature-metadata" => $"{prefix}{progressBar} {T(localization, "progress.buildingCreatureMetadata", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "write-target" => $"{prefix}{progressBar} {T(localization, "progress.wroteTargets", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["files"] = progress.WrittenFileCount, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "export-file" => $"{prefix}{progressBar} {T(localization, "progress.exportedFiles", new Dictionary<string, object?> { ["current"] = progress.Current, ["total"] = progress.Total, ["written"] = progress.WrittenFileCount, ["skipped"] = progress.SkippedCount, ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })}",
+            "build-staging" => $"{prefix} {message ?? T(localization, "progress.buildingStaging")}",
             "copy-source-resource" => $"{prefix}{progressBar} source resources copied{path}",
             "rename-stream" => $"{prefix}{progressBar} stream files renamed | backups {progress.BackupCount}{path}",
             "backup-source-ymt" => $"{prefix}{progressBar} source YMTs backed up | renames {progress.RenameCount} | backups {progress.BackupCount}{path}",
             "remove-source-ymt" => $"{prefix}{progressBar} source YMTs removed from copy | renames {progress.RenameCount} | removed {progress.RemovedCount}{path}",
             "backup-source-metadata" => $"{prefix}{progressBar} source metadata backed up | renames {progress.RenameCount} | backups {progress.BackupCount}{path}",
             "remove-source-metadata" => $"{prefix}{progressBar} source metadata removed from copy | renames {progress.RenameCount} | removed {progress.RemovedCount}{path}",
-            "copy-generated-resource" => $"{prefix} {progress.Message} | generated files {progress.WrittenFileCount}",
-            "complete" => FormatCompleteProgress(prefix, progress),
-            _ => $"{prefix} {progress.Message ?? progress.Stage}",
+            "copy-generated-resource" => $"{prefix} {message ?? T(localization, "progress.copiedGeneratedResource", new Dictionary<string, object?> { ["path"] = Path.GetFileName(progress.Path ?? string.Empty) })} | generated files {progress.WrittenFileCount}",
+            "complete" => FormatCompleteProgress(prefix, progress, localization),
+            _ => $"{prefix} {message ?? progress.Stage}",
         };
     }
 
-    private static string FormatCompleteProgress(string prefix, OperationProgress progress)
+    private static string FormatCompleteProgress(string prefix, OperationProgress progress, LocalizationService localization)
     {
+        var message = progress.MessageKey is { } key
+            ? T(localization, key, progress.MessageArguments)
+            : progress.Message;
         var stats = progress.Operation switch
         {
-            "analyze" => $"sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount} | targets {progress.TargetCount} | renames {progress.RenameCount}",
-            "build" => $"targets {progress.TargetCount} | files written {progress.WrittenFileCount}",
+            "analyze" => T(localization, "progress.analyzeStats", new Dictionary<string, object?> { ["sources"] = progress.SourceCount, ["warnings"] = progress.WarningCount, ["errors"] = progress.ErrorCount, ["targets"] = progress.TargetCount, ["renames"] = progress.RenameCount }),
+            "build" => T(localization, "progress.buildStats", new Dictionary<string, object?> { ["targets"] = progress.TargetCount, ["files"] = progress.WrittenFileCount }),
             "apply" => progress.RemovedCount > 0
-                ? $"renames {progress.RenameCount} | removed {progress.RemovedCount} | generated files {progress.WrittenFileCount}"
-                : $"renames {progress.RenameCount} | backups {progress.BackupCount} | generated files {progress.WrittenFileCount}",
-            "export-xml" => $"written {progress.WrittenFileCount} | skipped {progress.SkippedCount}",
+                ? T(localization, "progress.applyStats", new Dictionary<string, object?> { ["renames"] = progress.RenameCount, ["removed"] = progress.RemovedCount, ["files"] = progress.WrittenFileCount })
+                : T(localization, "progress.applyBackupStats", new Dictionary<string, object?> { ["renames"] = progress.RenameCount, ["backups"] = progress.BackupCount, ["files"] = progress.WrittenFileCount }),
+            "export-xml" => T(localization, "progress.exportStats", new Dictionary<string, object?> { ["written"] = progress.WrittenFileCount, ["skipped"] = progress.SkippedCount }),
             _ => string.Empty,
         };
 
         return string.IsNullOrWhiteSpace(stats)
-            ? $"{prefix} {progress.Message ?? "Complete."}"
-            : $"{prefix} {progress.Message ?? "Complete."} | {stats}";
+            ? $"{prefix} {message ?? T(localization, "progress.complete", new Dictionary<string, object?> { ["operation"] = progress.Operation })}"
+            : $"{prefix} {message ?? T(localization, "progress.complete", new Dictionary<string, object?> { ["operation"] = progress.Operation })} | {stats}";
     }
 
     private static string BuildBar(int current, int total)
@@ -422,11 +445,12 @@ internal sealed class ConsoleProgressWriter : IDisposable
     private int _lastLength;
     private bool _hasActiveLine;
     private int _spinnerIndex;
-    private string _currentText = "Working...";
+    private string _currentText;
     private bool _isComplete;
 
-    public ConsoleProgressWriter()
+    public ConsoleProgressWriter(LocalizationService localization)
     {
+        _currentText = localization.Translate("cli.working");
         if (_useLiveUpdates)
         {
             _timer = new Timer(Tick, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(125));

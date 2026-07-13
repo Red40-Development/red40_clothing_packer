@@ -22,7 +22,8 @@ public sealed class PedVariationReader
         var availCompValues = ParseIntList(RequiredElement(root, "availComp").Value);
         if (availCompValues.Length != ClothingConstants.ComponentSlotCount)
         {
-            messages.Add(new(ValidationSeverity.Error, "availComp-length", $"availComp must have {ClothingConstants.ComponentSlotCount} entries."));
+            messages.Add(new(ValidationSeverity.Error, "diagnostic.availCompLength", $"availComp must have {ClothingConstants.ComponentSlotCount} entries.",
+                new Dictionary<string, object?> { ["count"] = ClothingConstants.ComponentSlotCount }));
         }
 
         var componentData = Items(RequiredElement(root, "aComponentData3"));
@@ -40,7 +41,8 @@ public sealed class PedVariationReader
 
             if (componentDataIndex < 0 || componentDataIndex >= componentData.Count)
             {
-                messages.Add(new(ValidationSeverity.Error, "availComp-range", $"Component {componentId} points outside aComponentData3."));
+                messages.Add(new(ValidationSeverity.Error, "diagnostic.availCompRange", $"Component {componentId} points outside aComponentData3.",
+                    new Dictionary<string, object?> { ["component"] = componentId }));
                 continue;
             }
 
@@ -62,7 +64,8 @@ public sealed class PedVariationReader
 
             foreach (var duplicatePair in duplicatePairs)
             {
-                messages.Add(new(ValidationSeverity.Warning, "duplicate-compInfo", $"Component {componentId} has duplicate compInfo for drawable {duplicatePair}."));
+                messages.Add(new(ValidationSeverity.Warning, "diagnostic.duplicateCompInfo", $"Component {componentId} has duplicate compInfo for drawable {duplicatePair}.",
+                    new Dictionary<string, object?> { ["component"] = componentId, ["drawable"] = duplicatePair }));
             }
 
             foreach (var compInfo in componentInfos)
@@ -74,7 +77,8 @@ public sealed class PedVariationReader
 
                 if (drawblIdx < 0 || drawblIdx >= drawables.Count)
                 {
-                    messages.Add(new(ValidationSeverity.Error, "compInfo-range", $"Component {componentId} compInfo drawable index {drawblIdx} is out of range."));
+                    messages.Add(new(ValidationSeverity.Error, "diagnostic.compInfoRange", $"Component {componentId} compInfo drawable index {drawblIdx} is out of range.",
+                        new Dictionary<string, object?> { ["component"] = componentId, ["drawable"] = drawblIdx }));
                 }
                 else if (componentId == 6
                          && TryGetFloatArrayValue(compInfo, "pedXml_expressionMods", 4, out var highHeelExpression)
@@ -141,7 +145,8 @@ public sealed class PedVariationReader
             var duplicates = group.GroupBy(item => item.PropId).Where(item => item.Key >= 0 && item.Count() > 1);
             foreach (var duplicate in duplicates)
             {
-                messages.Add(new(ValidationSeverity.Warning, "duplicate-propId", $"Anchor {group.Key} has duplicate propId {duplicate.Key}."));
+                messages.Add(new(ValidationSeverity.Warning, "diagnostic.duplicatePropId", $"Anchor {group.Key} has duplicate propId {duplicate.Key}.",
+                    new Dictionary<string, object?> { ["anchor"] = group.Key, ["prop"] = duplicate.Key }));
             }
 
             var ordered = group.OrderBy(item => item.PropId).ThenBy(item => item.Index).Select(item => item.Item).ToList();

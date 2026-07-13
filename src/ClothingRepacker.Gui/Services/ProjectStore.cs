@@ -25,14 +25,7 @@ public sealed class ProjectStore : IProjectStore
 
     public async Task<ProjectLoadResult> LoadLastProjectAsync(CancellationToken cancellationToken = default)
     {
-        if (!File.Exists(_appSettingsPath))
-        {
-            return new ProjectLoadResult(new ProjectSettings(), string.Empty);
-        }
-
-        await using var stream = File.OpenRead(_appSettingsPath);
-        var appSettings = await JsonSerializer.DeserializeAsync<AppSettings>(stream, _jsonOptions, cancellationToken)
-            ?? new AppSettings(string.Empty);
+        var appSettings = await LoadAppSettingsAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(appSettings.LastProjectPath) && File.Exists(appSettings.LastProjectPath))
         {
             return new ProjectLoadResult(await LoadProjectAsync(appSettings.LastProjectPath, cancellationToken), appSettings.LastProjectPath);
@@ -40,6 +33,9 @@ public sealed class ProjectStore : IProjectStore
 
         return new ProjectLoadResult(new ProjectSettings(), string.Empty);
     }
+
+    public async Task<string?> LoadLanguageOverrideAsync(CancellationToken cancellationToken = default)
+        => (await LoadAppSettingsAsync(cancellationToken)).LanguageOverride;
 
     public async Task<ProjectSettings> LoadProjectAsync(string projectPath, CancellationToken cancellationToken = default)
     {
@@ -58,10 +54,34 @@ public sealed class ProjectStore : IProjectStore
 
     public async Task SaveLastProjectPathAsync(string? projectPath, CancellationToken cancellationToken = default)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_appSettingsPath)!);
-        await using var stream = File.Create(_appSettingsPath);
-        await JsonSerializer.SerializeAsync(stream, new AppSettings(projectPath ?? string.Empty), _jsonOptions, cancellationToken);
+        var current = await LoadAppSettingsAsync(cancellationToken);
+        await SaveAppSettingsAsync(current with { LastProjectPath = projectPath ?? string.Empty }, cancellationToken);
     }
 
-    private sealed record AppSettings(string LastProjectPath);
+    public async Task SaveLanguageOverrideAsync(string? languageOverride, CancellationToken cancellationToken = default)
+    {
+        var current = await LoadAppSettingsAsync(cancellationToken);
+        await SaveAppSettingsAsync(current with { LanguageOverride = languageOverride }, cancellationToken);
+    }
+
+    private async Task<AppSettings> LoadAppSettingsAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_appSettingsPath))
+        {
+            return new AppSettings(string.Empty, null);
+        }
+
+        await using var stream = File.OpenRead(_appSettingsPath);
+        return await JsonSerializer.DeserializeAsync<AppSettings>(stream, _jsonOptions, cancellationToken)
+            ?? new AppSettings(string.Empty, null);
+    }
+
+    private async Task SaveAppSettingsAsync(AppSettings settings, CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_appSettingsPath)!);
+        await using var stream = File.Create(_appSettingsPath);
+        await JsonSerializer.SerializeAsync(stream, settings, _jsonOptions, cancellationToken);
+    }
+
+    private sealed record AppSettings(string LastProjectPath, string? LanguageOverride = null);
 }

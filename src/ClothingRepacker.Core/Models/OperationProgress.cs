@@ -15,4 +15,6 @@ public sealed record OperationProgress(
     int RenameCount = 0,
     int BackupCount = 0,
     int RemovedCount = 0,
-    int SkippedCount = 0);
+    int SkippedCount = 0,
+    string? MessageKey = null,
+    IReadOnlyDictionary<string, object?>? MessageArguments = null);

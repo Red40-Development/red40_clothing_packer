@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
+using ClothingRepacker.Core.Localization;
 using ClothingRepacker.Core.Reporting;
 
 namespace ClothingRepacker.Gui.Controls;
@@ -11,6 +12,8 @@ public sealed class RepackMapControl : Control
 {
     public static readonly StyledProperty<YmtRepackReport?> ReportProperty =
         AvaloniaProperty.Register<RepackMapControl, YmtRepackReport?>(nameof(Report));
+    public static readonly StyledProperty<LocalizationService?> LocalizationProperty =
+        AvaloniaProperty.Register<RepackMapControl, LocalizationService?>(nameof(Localization));
 
     private const double MinimumMapWidth = 980;
     private const double MarginSize = 12;
@@ -50,6 +53,7 @@ public sealed class RepackMapControl : Control
 
     private readonly List<(Rect Rect, YmtRepackSegment Segment)> _hitRegions = [];
     private YmtRepackSegment? _hoveredSegment;
+    private LocalizationService _localization = new();
 
     public RepackMapControl()
     {
@@ -62,11 +66,22 @@ public sealed class RepackMapControl : Control
         set => SetValue(ReportProperty, value);
     }
 
+    public LocalizationService? Localization
+    {
+        get => GetValue(LocalizationProperty);
+        set => SetValue(LocalizationProperty, value);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == ReportProperty)
+        if (change.Property == ReportProperty || change.Property == LocalizationProperty)
         {
+            if (change.Property == LocalizationProperty && change.NewValue is LocalizationService localization)
+            {
+                _localization = localization;
+            }
+
             _hoveredSegment = null;
             _hitRegions.Clear();
             InvalidateMeasure();
@@ -92,7 +107,7 @@ public sealed class RepackMapControl : Control
 
         if (Report is not { } report || (report.Targets.Count == 0 && report.CreatureMetadataTargets.Count == 0))
         {
-            DrawText(context, "Analyze resources to see the YMT repack map.", new Point(MarginSize, MarginSize), 13, MutedTextBrush);
+            DrawText(context, T("map.analyzeHint"), new Point(MarginSize, MarginSize), 13, MutedTextBrush);
             return;
         }
 
@@ -177,14 +192,14 @@ public sealed class RepackMapControl : Control
         return MarginSize * 2 + TargetHeaderHeight + legendRows * LegendRowHeight + TargetGap + targetHeight + metadataHeight;
     }
 
-    private static double DrawLegend(
+    private double DrawLegend(
         DrawingContext context,
         YmtRepackReport report,
         IReadOnlyDictionary<string, IBrush> sourceBrushes,
         double y,
         double width)
     {
-        DrawText(context, "Source legend", new Point(MarginSize, y), 13, TextBrush);
+        DrawText(context, T("map.sourceLegend"), new Point(MarginSize, y), 13, TextBrush);
         y += TargetHeaderHeight;
         var columns = Math.Max(1, (int)((width - MarginSize * 2) / LegendColumnWidth));
         columns = Math.Min(columns, 3);
@@ -205,24 +220,24 @@ public sealed class RepackMapControl : Control
         return y + rows * LegendRowHeight + TargetGap;
     }
 
-    private static double DrawCreatureMetadata(DrawingContext context, YmtRepackReport report, double y)
+    private double DrawCreatureMetadata(DrawingContext context, YmtRepackReport report, double y)
     {
         if (report.CreatureMetadataTargets.Count == 0)
         {
             return y;
         }
 
-        DrawText(context, "Creature metadata", new Point(MarginSize, y), 13, TextBrush);
+        DrawText(context, T("map.creatureMetadata"), new Point(MarginSize, y), 13, TextBrush);
         y += TargetHeaderHeight;
         foreach (var target in report.CreatureMetadataTargets)
         {
             var status = target.IsUnnecessaryOutput
-                ? "UNNECESSARY OUTPUT"
+                ? T("map.unnecessaryOutput")
                 : target.IsMissingOutput
-                    ? "MISSING OUTPUT"
+                    ? T("map.missingOutput")
                     : target.IsRequired
-                        ? "required"
-                        : "not required";
+                        ? T("map.required")
+                        : T("map.notRequired");
             var brush = target.IsUnnecessaryOutput
                 ? UnnecessaryMetadataBrush
                 : target.IsMissingOutput
@@ -230,14 +245,14 @@ public sealed class RepackMapControl : Control
                     : target.IsRequired
                         ? RequiredMetadataBrush
                         : MutedTextBrush;
-            var output = target.OutputName is null ? "no output" : target.OutputName;
+            var output = target.OutputName is null ? T("map.noOutput") : target.OutputName;
             var source = target.SourceMetadataPaths.Count == 0
-                ? "no source metadata"
-                : $"{target.SourceMetadataPaths.Count} source metadata file(s)";
+                ? T("map.noSourceMetadata")
+                : T("map.sourceMetadataCount", new Dictionary<string, object?> { ["count"] = target.SourceMetadataPaths.Count });
             var sourceYmts = target.SourceYmtPaths.Count == 0
                 ? string.Empty
                 : $" | YMTs: {string.Join(", ", target.SourceYmtPaths.Select(Path.GetFileName))}";
-            var repair = target.HasRepairHints ? " + repair hints" : string.Empty;
+            var repair = target.HasRepairHints ? T("map.repairHints") : string.Empty;
             DrawText(
                 context,
                 $"{target.TargetFullCollection}  {status}  |  {output}  |  {source}{sourceYmts}{repair}",
@@ -246,7 +261,7 @@ public sealed class RepackMapControl : Control
                 brush);
             if (!string.IsNullOrWhiteSpace(target.OutputYmtPath))
             {
-                DrawText(context, $"Output: {target.OutputYmtPath}", new Point(MarginSize + 18, y + 15), 10, MutedTextBrush);
+                DrawText(context, T("map.output", new Dictionary<string, object?> { ["path"] = target.OutputYmtPath }), new Point(MarginSize + 18, y + 15), 10, MutedTextBrush);
             }
 
             y += MetadataRowHeight;
@@ -295,7 +310,7 @@ public sealed class RepackMapControl : Control
         return result;
     }
 
-    private static string BuildTip(YmtRepackSegment segment)
+    private string BuildTip(YmtRepackSegment segment)
     {
         if (segment.IsFree)
         {
@@ -304,19 +319,22 @@ public sealed class RepackMapControl : Control
 
         return $"{segment.TargetFullCollection}\n"
                + $"{KindLabel(segment.Kind)} {segment.SlotId} {segment.SlotName}\n"
-               + $"Source: {segment.SourceResource}\n"
+               + $"{T("map.source", new Dictionary<string, object?> { ["source"] = segment.SourceResource })}\n"
                + $"{segment.SourceYmtPath}\n"
-               + $"Old {segment.OldRange} -> New {segment.NewRange} ({segment.Count})";
+               + T("map.oldNew", new Dictionary<string, object?> { ["old"] = segment.OldRange, ["new"] = segment.NewRange, ["count"] = segment.Count });
     }
 
-    private static string KindLabel(YmtRepackLaneKind kind)
-        => kind == YmtRepackLaneKind.Component ? "component" : "prop";
+    private string KindLabel(YmtRepackLaneKind kind)
+        => kind == YmtRepackLaneKind.Component ? T("report.component") : T("report.prop");
 
     private static string SourceKey(YmtRepackSegment segment)
         => SourceKey(segment.SourceResource, segment.SourceYmtPath);
 
     private static string SourceKey(string resource, string ymtPath)
         => $"{resource}\n{ymtPath}";
+
+    private string T(string key, IReadOnlyDictionary<string, object?>? arguments = null)
+        => _localization.Translate(key, arguments);
 
     private static void DrawText(DrawingContext context, string text, Point point, double size, IBrush brush)
     {

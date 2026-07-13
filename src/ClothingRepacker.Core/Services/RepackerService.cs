@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using ClothingRepacker.Core.Codecs;
 using ClothingRepacker.Core.Hashing;
+using ClothingRepacker.Core.Localization;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Planning;
 using ClothingRepacker.Core.Scanning;
@@ -97,6 +98,8 @@ public sealed class RepackerService
         var streamFiles = new List<StreamFile>();
         var warnings = new List<string>();
         var errors = new List<string>();
+        var warningDiagnostics = new List<LocalizedDiagnostic>();
+        var errorDiagnostics = new List<LocalizedDiagnostic>();
         var manifestWarnings = new List<SourceManifestWarning>();
         var workItems = new List<(ResourceScanItem Item, string Path)>();
         var creatureMetadataReferencesByResource = new Dictionary<string, IReadOnlyList<ShopCreatureMetadataReference>>(StringComparer.OrdinalIgnoreCase);
@@ -122,7 +125,8 @@ public sealed class RepackerService
             "analyze",
             "start",
             Total: workItems.Count,
-            Message: $"Found {scanItems.Count} resources, {workItems.Count} YMT/XML candidates, {streamFiles.Count} stream files."));
+            MessageKey: "progress.foundCandidates",
+            MessageArguments: new Dictionary<string, object?> { ["resources"] = scanItems.Count, ["candidates"] = workItems.Count, ["files"] = streamFiles.Count }));
 
         for (var index = 0; index < workItems.Count; index++)
         {
@@ -136,7 +140,8 @@ public sealed class RepackerService
                     if (!HasCorrespondingShopMetadata(metadata, creatureMetadataReferencesByResource[item.ResourceName]))
                     {
                         brokenCreatureMetadata.Add(metadata);
-                        warnings.Add($"{path}: Creature metadata has no corresponding ShopPedApparel creatureMetaData reference and will be backed up without being merged.");
+                        AddDiagnostic(warnings, warningDiagnostics, "diagnostic.metadataUnreferenced", new Dictionary<string, object?> { ["path"] = path },
+                            $"{path}: Creature metadata has no corresponding ShopPedApparel creatureMetaData reference and will be backed up without being merged.");
                         continue;
                     }
 
@@ -150,13 +155,27 @@ public sealed class RepackerService
                 }
 
                 var source = _reader.Read(xml, path, item.ResourceName, item.ResourceRoot);
-                warnings.AddRange(source.Messages.Where(message => message.Severity == ValidationSeverity.Warning).Select(message => $"{path}: {message.Message}"));
-                errors.AddRange(source.Messages.Where(message => message.Severity == ValidationSeverity.Error).Select(message => $"{path}: {message.Message}"));
+                foreach (var message in source.Messages)
+                {
+                    if (message.Severity is not (ValidationSeverity.Warning or ValidationSeverity.Error))
+                    {
+                        continue;
+                    }
+
+                    var fallback = $"{path}: {message.Message}";
+                    var arguments = new Dictionary<string, object?>(message.Arguments ?? new Dictionary<string, object?>())
+                    {
+                        ["path"] = path,
+                    };
+                    var diagnostics = message.Severity == ValidationSeverity.Warning ? warningDiagnostics : errorDiagnostics;
+                    var messages = message.Severity == ValidationSeverity.Warning ? warnings : errors;
+                    AddDiagnostic(messages, diagnostics, message.Code, arguments, fallback);
+                }
                 sources.Add(source);
             }
             catch (Exception ex)
             {
-                errors.Add($"{path}: {ex.Message}");
+                AddDiagnostic(errors, errorDiagnostics, "legacy", new Dictionary<string, object?>(), $"{path}: {ex.Message}");
             }
             finally
             {
@@ -175,7 +194,12 @@ public sealed class RepackerService
         var missingCreatureMetadataReferences = FindMissingCreatureMetadataReferences(creatureMetadataReferencesByResource, creatureMetadata, brokenCreatureMetadata);
         foreach (var reference in missingCreatureMetadataReferences)
         {
-            warnings.Add($"{reference.ShopMetaPath}: ShopPedApparel creatureMetaData references missing creature metadata '{reference.Reference}' and generated creature metadata will be omitted for merged targets from resource '{reference.Resource}'.");
+            AddDiagnostic(warnings, warningDiagnostics, "diagnostic.missingCreatureMetadata", new Dictionary<string, object?>
+            {
+                ["path"] = reference.ShopMetaPath,
+                ["reference"] = reference.Reference,
+                ["resource"] = reference.Resource,
+            }, $"{reference.ShopMetaPath}: ShopPedApparel creatureMetaData references missing creature metadata '{reference.Reference}' and generated creature metadata will be omitted for merged targets from resource '{reference.Resource}'.");
         }
 
         progress?.Report(new OperationProgress(
@@ -183,7 +207,7 @@ public sealed class RepackerService
             "plan-targets",
             workItems.Count,
             workItems.Count,
-            Message: "Planning merged target collections.",
+            MessageKey: "progress.planningTargets",
             SourceCount: sources.Count,
             WarningCount: warnings.Count,
             ErrorCount: errors.Count));
@@ -191,7 +215,8 @@ public sealed class RepackerService
         var mergeableSources = sources.Where(IsMergeableFreemodeSource).ToList();
         foreach (var source in sources.Except(mergeableSources))
         {
-            warnings.Add($"{source.YmtPath}: Non-freemode YMT skipped. It will only be copied to the generated resources root when copy-before-rename apply mode is enabled.");
+            AddDiagnostic(warnings, warningDiagnostics, "diagnostic.nonFreemodeSkipped", new Dictionary<string, object?> { ["path"] = source.YmtPath },
+                $"{source.YmtPath}: Non-freemode YMT skipped. It will only be copied to the generated resources root when copy-before-rename apply mode is enabled.");
         }
 
         var targets = _mergePlanner.Plan(mergeableSources, settings, warnings, errors);
@@ -247,7 +272,7 @@ public sealed class RepackerService
             "finalize-plan",
             targetPlans.Count,
             targetPlans.Count,
-            Message: "Finalizing merge plan.",
+            MessageKey: "progress.finalizing",
             SourceCount: sources.Count,
             WarningCount: warnings.Count,
             ErrorCount: errors.Count,
@@ -305,7 +330,7 @@ public sealed class RepackerService
             "complete",
             workItems.Count,
             workItems.Count,
-            Message: "Analyze complete.",
+            MessageKey: "progress.analyzeComplete",
             SourceCount: sources.Count,
             WarningCount: warnings.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
             ErrorCount: errors.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
@@ -338,10 +363,32 @@ public sealed class RepackerService
             SourceAlternateMetadataBackups = sourceAlternateMetadataBackups,
             Warnings = warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             Errors = errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            WarningDiagnostics = CompleteDiagnostics(warningDiagnostics, warnings),
+            ErrorDiagnostics = CompleteDiagnostics(errorDiagnostics, errors),
         };
 
         return new AnalyzeResult(plan, sources, streamFiles, creatureMetadata);
     }
+
+    private static void AddDiagnostic(
+        ICollection<string> legacy,
+        ICollection<LocalizedDiagnostic> diagnostics,
+        string code,
+        IReadOnlyDictionary<string, object?> arguments,
+        string fallback)
+    {
+        legacy.Add(fallback);
+        diagnostics.Add(new LocalizedDiagnostic(code, arguments, fallback));
+    }
+
+    private static List<LocalizedDiagnostic> CompleteDiagnostics(
+        IReadOnlyList<LocalizedDiagnostic> diagnostics,
+        IReadOnlyList<string> legacy)
+        => diagnostics
+            .Concat(legacy
+                .Where(text => !diagnostics.Any(diagnostic => diagnostic.FallbackText.Equals(text, StringComparison.OrdinalIgnoreCase)))
+                .Select(LocalizedDiagnostic.Legacy))
+            .ToList();
 
     public async Task SavePlanAsync(MergePlan plan, string outputPath, CancellationToken cancellationToken = default)
     {
@@ -377,7 +424,8 @@ public sealed class RepackerService
             "build",
             "start",
             Total: plan.TargetCollections.Count,
-            Message: $"Loaded {sources.Count} source YMTs for {plan.TargetCollections.Count} target collections.",
+            MessageKey: "progress.loadedSources",
+            MessageArguments: new Dictionary<string, object?> { ["sources"] = sources.Count, ["targets"] = plan.TargetCollections.Count },
             SourceCount: sources.Count));
 
         for (var index = 0; index < plan.TargetCollections.Count; index++)
@@ -391,7 +439,8 @@ public sealed class RepackerService
                 index + 1,
                 plan.TargetCollections.Count,
                 ymtOutputPath,
-                $"Building target collection {targetPlan.FullCollectionName}.",
+                MessageKey: "progress.buildingTargetNamed",
+                MessageArguments: new Dictionary<string, object?> { ["name"] = targetPlan.FullCollectionName },
                 SourceCount: sources.Count,
                 TargetCount: index));
 
@@ -457,7 +506,8 @@ public sealed class RepackerService
                 index + 1,
                 creatureMetadataOutputs.Count,
                 creatureMetadataOutputPath,
-                $"Building creature metadata {creatureMetadataOutput.Name}.",
+                MessageKey: "progress.buildingCreatureMetadataNamed",
+                MessageArguments: new Dictionary<string, object?> { ["name"] = creatureMetadataOutput.Name },
                 SourceCount: sources.Count,
                 TargetCount: plan.TargetCollections.Count,
                 WrittenFileCount: writtenFiles.Count));
@@ -541,7 +591,7 @@ public sealed class RepackerService
             "complete",
             plan.TargetCollections.Count,
             plan.TargetCollections.Count,
-            Message: "Build complete.",
+            MessageKey: "progress.buildComplete",
             SourceCount: sources.Count,
             TargetCount: plan.TargetCollections.Count,
             WrittenFileCount: writtenFiles.Count));
@@ -611,7 +661,8 @@ public sealed class RepackerService
             "export-xml",
             "start",
             Total: ymtFiles.Count,
-            Message: $"Found {ymtFiles.Count} YMT files to export."));
+            MessageKey: "progress.foundYmtFiles",
+            MessageArguments: new Dictionary<string, object?> { ["count"] = ymtFiles.Count }));
 
         for (var index = 0; index < ymtFiles.Count; index++)
         {
@@ -653,7 +704,7 @@ public sealed class RepackerService
             "complete",
             ymtFiles.Count,
             ymtFiles.Count,
-            Message: "XML export complete.",
+            MessageKey: "progress.xmlExportComplete",
             WrittenFileCount: writtenFiles.Count,
             SkippedCount: skippedFiles.Count));
 
@@ -690,9 +741,15 @@ public sealed class RepackerService
             "apply",
             "start",
             Total: resourceRootsToCopy.Count + plan.StreamRenames.Count + sourceBackupPlanCount,
-            Message: options.CopyResourcesToOutputBeforeRename
-                ? $"Preparing to copy {resourceRootsToCopy.Count} source resources, then apply {plan.StreamRenames.Count} stream renames to the output copy."
-                : $"Preparing to apply {plan.StreamRenames.Count} stream renames and {sourceBackupPlanCount} source backups."));
+            MessageKey: options.CopyResourcesToOutputBeforeRename
+                ? "progress.preparingCopyApply"
+                : "progress.preparingApply",
+            MessageArguments: new Dictionary<string, object?>
+            {
+                ["resources"] = resourceRootsToCopy.Count,
+                ["renames"] = plan.StreamRenames.Count,
+                ["backups"] = sourceBackupPlanCount,
+            }));
 
         var validationErrors = _planValidator.Validate(plan);
         if (validationErrors.Count > 0)
@@ -711,7 +768,7 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "build-staging",
-            Message: "Building generated resource into a staging folder."));
+            MessageKey: "progress.buildingStaging"));
         var buildResult = await BuildAsync(plan, stagingRoot, new BuildOptions
         {
             IncludeYmtXml = options.IncludeYmtXml,
@@ -920,9 +977,10 @@ public sealed class RepackerService
         progress?.Report(new OperationProgress(
             "apply",
             "copy-generated-resource",
-            Message: plan.TargetCollections.Count > 0
-                ? $"Copied generated resource to {Path.Combine(generatedResourcesRoot, plan.TargetResource)}."
-                : "No merged freemode resource was generated.",
+            MessageKey: plan.TargetCollections.Count > 0
+                ? "progress.copiedGeneratedResource"
+                : "progress.noMergedResource",
+            MessageArguments: new Dictionary<string, object?> { ["path"] = Path.Combine(generatedResourcesRoot, plan.TargetResource) },
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
             BackupCount: entries.Count(IsSourceBackupEntry),
             WrittenFileCount: buildResult.WrittenFiles.Count));
@@ -932,7 +990,8 @@ public sealed class RepackerService
             "complete",
             plan.StreamRenames.Count + sourceBackupPlanCount,
             plan.StreamRenames.Count + sourceBackupPlanCount,
-            Message: $"Apply complete. Backup manifest written to {manifestPath}.",
+            MessageKey: "progress.applyComplete",
+            MessageArguments: new Dictionary<string, object?> { ["path"] = manifestPath },
             RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
             BackupCount: entries.Count(IsSourceBackupEntry),
             WrittenFileCount: buildResult.WrittenFiles.Count));
@@ -1281,7 +1340,8 @@ public sealed class RepackerService
             "restore",
             "start",
             Total: actions.Count,
-            Message: $"Preparing to restore {actions.Count} action(s) from {preview.ManifestPath}."));
+            MessageKey: "progress.preparingRestore",
+            MessageArguments: new Dictionary<string, object?> { ["count"] = actions.Count, ["path"] = preview.ManifestPath }));
 
         var completed = 0;
         foreach (var action in actions.Where(action => action.Kind == "delete-generated-resource"))
@@ -1299,7 +1359,8 @@ public sealed class RepackerService
                 completed,
                 actions.Count,
                 action.DestinationPath,
-                $"Removed generated resource {action.DestinationPath}."));
+                MessageKey: "progress.removedGeneratedResourceNamed",
+                MessageArguments: new Dictionary<string, object?> { ["path"] = action.DestinationPath }));
         }
 
         foreach (var action in actions.Where(action => action.Kind == "copy-backup-file"))
@@ -1320,7 +1381,8 @@ public sealed class RepackerService
                 completed,
                 actions.Count,
                 action.DestinationPath,
-                $"Restored {action.DestinationPath} from {action.SourcePath}."));
+                MessageKey: "progress.restoredFile",
+                MessageArguments: new Dictionary<string, object?> { ["destination"] = action.DestinationPath, ["source"] = action.SourcePath }));
         }
 
         foreach (var action in actions.Where(action => action.Kind == "move-stream-file"))
@@ -1341,7 +1403,8 @@ public sealed class RepackerService
                 completed,
                 actions.Count,
                 action.DestinationPath,
-                $"Moved {action.SourcePath} back to {action.DestinationPath}."));
+                MessageKey: "progress.movedFile",
+                MessageArguments: new Dictionary<string, object?> { ["source"] = action.SourcePath, ["destination"] = action.DestinationPath }));
         }
 
         progress?.Report(new OperationProgress(
@@ -1349,7 +1412,8 @@ public sealed class RepackerService
             "complete",
             actions.Count,
             actions.Count,
-            Message: $"Restore complete. Applied {completed} action(s)."));
+            MessageKey: "progress.restoreComplete",
+            MessageArguments: new Dictionary<string, object?> { ["count"] = completed }));
     }
 
     private async Task<List<BackupEntry>> LoadBackupEntriesAsync(string backupManifestPath, CancellationToken cancellationToken)
@@ -1431,7 +1495,8 @@ public sealed class RepackerService
                 index + 1,
                 plan.SourceYmts.Count,
                 source.Path,
-                $"Loading source YMT {source.Path}.",
+                MessageKey: "progress.loadingSourceNamed",
+                MessageArguments: new Dictionary<string, object?> { ["path"] = source.Path },
                 SourceCount: index));
 
             try

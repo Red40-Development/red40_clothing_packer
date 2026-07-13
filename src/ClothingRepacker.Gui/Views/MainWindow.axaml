@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:ClothingRepacker.Gui.Controls"
         x:Class="ClothingRepacker.Gui.Views.MainWindow"
-        Title="Red40 Clothing Repacker"
+        Title="{Binding Localization[app.title]}"
         Width="1280"
         Height="960"
         MinWidth="980"
@@ -14,7 +14,7 @@
         <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
           <StackPanel Orientation="Horizontal" Spacing="10">
             <TextBlock Classes="section-title"
-                       Text="Red40 Clothing Repacker"
+                       Text="{Binding Localization[app.title]}"
                        Margin="0"
                        VerticalAlignment="Center" />
             <TextBlock Text="{Binding VersionCheckText}"
@@ -28,7 +28,7 @@
                     BorderThickness="0"
                     Cursor="Hand"
                     ToolTip.Tip="{Binding UpdateReleaseUrl}">
-              <TextBlock Text="Update Available"
+              <TextBlock Text="{Binding Localization[update.available]}"
                          TextDecorations="Underline"
                          Foreground="#2B6CB0" />
             </Button>
@@ -39,7 +39,7 @@
         <StackPanel Grid.Column="1" Grid.RowSpan="3" Spacing="10" HorizontalAlignment="Right" VerticalAlignment="Bottom">
           <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right" VerticalAlignment="Center">
             <StackPanel Spacing="2" VerticalAlignment="Center" HorizontalAlignment="Right">
-              <TextBlock Text="Like this software?"
+              <TextBlock Text="{Binding Localization[support.likeThisSoftware]}"
                          FontSize="12"
                          HorizontalAlignment="Right"
                          Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
@@ -49,9 +49,9 @@
                       Background="Transparent"
                       BorderThickness="0"
                       Cursor="Hand"
-                      ToolTip.Tip="Support our team"
+                      ToolTip.Tip="{Binding Localization[support.team]}"
                       HorizontalAlignment="Right">
-                <TextBlock Text="Support our team"
+                <TextBlock Text="{Binding Localization[support.team]}"
                            FontSize="12"
                            TextDecorations="Underline"
                            Foreground="#2B6CB0" />
@@ -63,7 +63,7 @@
                     Background="Transparent"
                     BorderThickness="0"
                     Cursor="Hand"
-                    ToolTip.Tip="Open Red40 Store"
+                    ToolTip.Tip="{Binding Localization[support.openStore]}"
                     HorizontalAlignment="Right">
               <Image Source="avares://ClothingRepacker.Gui/Assets/red40_logo.png"
                      Height="72"
@@ -72,18 +72,28 @@
             </Button>
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Content="Help" Command="{Binding HelpCommand}" />
-            <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
-            <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
-            <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
-            <Button Content="Cancel" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
+            <ComboBox ItemsSource="{Binding LanguageOptions}"
+                      SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}"
+                      Width="145"
+                      ToolTip.Tip="{Binding Localization[language.label]}">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DisplayName}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <Button Content="{Binding Localization[button.help]}" Command="{Binding HelpCommand}" />
+            <Button Content="{Binding Localization[button.analyze]}" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
+            <Button Content="{Binding Localization[button.buildPreview]}" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
+            <Button Content="{Binding Localization[button.apply]}" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />
+            <Button Content="{Binding Localization[button.cancel]}" Command="{Binding CancelCommand}" IsEnabled="{Binding IsBusy}" />
           </StackPanel>
         </StackPanel>
         <StackPanel Grid.Column="0" Grid.Row="2" Orientation="Horizontal" Spacing="8">
-          <Button Content="Open Project..." Click="OpenProject_Click" IsEnabled="{Binding CanEditProject}" />
-          <Button Content="Save Project" Click="SaveProject_Click" IsEnabled="{Binding CanEditProject}" />
-          <Button Content="Save Project As..." Click="SaveProjectAs_Click" IsEnabled="{Binding CanEditProject}" />
-          <Button Content="Clear Project" Click="ClearProject_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="{Binding Localization[project.open]}" Click="OpenProject_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="{Binding Localization[project.save]}" Click="SaveProject_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="{Binding Localization[project.saveAs]}" Click="SaveProjectAs_Click" IsEnabled="{Binding CanEditProject}" />
+          <Button Content="{Binding Localization[project.clear]}" Click="ClearProject_Click" IsEnabled="{Binding CanEditProject}" />
         </StackPanel>
       </Grid>
     </Border>
@@ -93,38 +103,38 @@
         <StackPanel Spacing="12">
           <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
             <StackPanel Spacing="8">
-              <TextBlock Classes="section-title" Text="Options" />
-              <TextBlock Text="New Merged Resource Name" />
+              <TextBlock Classes="section-title" Text="{Binding Localization[section.options]}" />
+              <TextBlock Text="{Binding Localization[field.newMergedResourceName]}" />
               <TextBox Text="{Binding TargetResource, Mode=TwoWay}" />
-              <TextBlock Text="Target prefix" />
+              <TextBlock Text="{Binding Localization[field.targetPrefix]}" />
               <TextBox Text="{Binding TargetPrefix, Mode=TwoWay}" />
               <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
               </Grid>
-              <CheckBox Content="Save generated plan JSON" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
-              <CheckBox Content="Copy source resources to output before renaming" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}"
-                        ToolTip.Tip="This copies the original resources to the output folder leaving the originals in place AdornerLayer modifying only the copies"/>
-              <CheckBox Content="Optimize YMT usage"
+              <CheckBox Content="{Binding Localization[option.savePlan]}" IsChecked="{Binding SavePlan, Mode=TwoWay}" />
+              <CheckBox Content="{Binding Localization[option.copyResources]}" IsChecked="{Binding CopyResourcesToOutputBeforeRename, Mode=TwoWay}"
+                        ToolTip.Tip="{Binding Localization[option.copyResources.tooltip]}"/>
+              <CheckBox Content="{Binding Localization[option.optimizeYmt]}"
                         IsChecked="{Binding OptimizeYmtUsage, Mode=TwoWay}"
-                        ToolTip.Tip="Rearranges component and prop lanes across generated YMTs to reduce the target count. Off by default because the conservative mode keeps source packs grouped together, and attempts to preserve relative source resource order." />
-              <Expander Header="Advanced" HorizontalAlignment="Stretch">
+                        ToolTip.Tip="{Binding Localization[option.optimizeYmt.tooltip]}" />
+              <Expander Header="{Binding Localization[section.advanced]}" HorizontalAlignment="Stretch">
                 <StackPanel Spacing="8" Margin="0,8,0,0">
-                  <Button Content="Export XML"
+                  <Button Content="{Binding Localization[button.exportXml]}"
                           Command="{Binding ExportXmlCommand}"
                           IsEnabled="{Binding CanExportXml}"
                           HorizontalAlignment="Stretch" />
-                  <TextBlock Text="Male prefix" />
+                  <TextBlock Text="{Binding Localization[field.malePrefix]}" />
                   <TextBox Text="{Binding MalePrefix, Mode=TwoWay}" />
-                  <TextBlock Text="Female prefix" />
+                  <TextBlock Text="{Binding Localization[field.femalePrefix]}" />
                   <TextBox Text="{Binding FemalePrefix, Mode=TwoWay}" />
-                  <CheckBox Content="Include debug client script" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" ToolTip.Tip="Includes a client side debug script to verify the target collections are loaded correctly"/>
-                  <CheckBox Content="Include preview YMT XML" IsChecked="{Binding IncludeYmtXml, Mode=TwoWay}" />
-                  <CheckBox Content="Overwrite XML previews during export" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
+                  <CheckBox Content="{Binding Localization[option.debugClient]}" IsChecked="{Binding IncludeDebugClient, Mode=TwoWay}" ToolTip.Tip="{Binding Localization[option.debugClient.tooltip]}"/>
+                  <CheckBox Content="{Binding Localization[option.previewYmtXml]}" IsChecked="{Binding IncludeYmtXml, Mode=TwoWay}" />
+                  <CheckBox Content="{Binding Localization[option.overwriteXml]}" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
                   <StackPanel Grid.Column="0" Spacing="4">
-                    <TextBlock Text="Max component drawables" />
+                    <TextBlock Text="{Binding Localization[field.maxComponentDrawables]}" />
                     <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerComponent, Mode=TwoWay}" />
                   </StackPanel>
                   <StackPanel Grid.Column="1" Spacing="4">
-                    <TextBlock Text="Max prop drawables" />
+                    <TextBlock Text="{Binding Localization[field.maxPropDrawables]}" />
                     <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerProp, Mode=TwoWay}" />
                   </StackPanel>
                 </StackPanel>
@@ -134,18 +144,18 @@
 
           <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
             <StackPanel Spacing="8">
-              <TextBlock Classes="section-title" Text="Paths" />
-              <TextBlock Text="Plan JSON" />
+              <TextBlock Classes="section-title" Text="{Binding Localization[section.paths]}" />
+              <TextBlock Text="{Binding Localization[field.planJson]}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                 <TextBox Grid.Column="0" Text="{Binding PlanPath, Mode=TwoWay}" />
                 <Button Grid.Column="1" Content="..." Click="BrowsePlan_Click" />
               </Grid>
-              <TextBlock Text="Output location" />
+              <TextBlock Text="{Binding Localization[field.outputLocation]}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                 <TextBox Grid.Column="0" Text="{Binding OutputPath, Mode=TwoWay}" />
                 <Button Grid.Column="1" Content="..." Click="BrowseOutput_Click" />
               </Grid>
-              <TextBlock Text="Backup location" />
+              <TextBlock Text="{Binding Localization[field.backupLocation]}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                 <TextBox Grid.Column="0" Text="{Binding BackupRoot, Mode=TwoWay}" />
                 <Button Grid.Column="1" Content="..." Click="BrowseBackup_Click" />
@@ -154,12 +164,12 @@
           </Border>
           <Border Padding="12" Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}" CornerRadius="6">
             <StackPanel Spacing="8">
-              <TextBlock Classes="section-title" Text="Restore Manifest Location" />
+              <TextBlock Classes="section-title" Text="{Binding Localization[section.restoreManifest]}" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
                 <TextBox Grid.Column="0" Text="{Binding RestoreManifestPath, Mode=TwoWay}" />
                 <Button Grid.Column="1" Content="..." Click="BrowseRestoreManifest_Click" />
               </Grid>
-              <Button Content="Restore Backup" Command="{Binding RestoreCommand}" IsEnabled="{Binding CanRestoreBackup}" HorizontalAlignment="Stretch" />
+              <Button Content="{Binding Localization[button.restoreBackup]}" Command="{Binding RestoreCommand}" IsEnabled="{Binding CanRestoreBackup}" HorizontalAlignment="Stretch" />
             </StackPanel>
           </Border>
         </StackPanel>
@@ -187,16 +197,16 @@
         </Border>
 
         <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
-          <TabItem Header="Resources">
+          <TabItem Header="{Binding Localization[tab.resources]}">
             <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="2">
               <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*" ColumnSpacing="8">
-                <Button Grid.Column="0" Content="Add Resource..." Click="BrowseResources_Click" />
-                <Button Grid.Column="1" Content="Remove" Click="RemoveResource_Click" />
-                <Button Grid.Column="2" Content="Clear" Click="ClearResources_Click" />
-                <Button Grid.Column="3" Content="Move Up" Command="{Binding MoveResourceUpCommand}" IsEnabled="{Binding CanMoveResourceUp}" />
-                <Button Grid.Column="4" Content="Move Down" Command="{Binding MoveResourceDownCommand}" IsEnabled="{Binding CanMoveResourceDown}" />
+                <Button Grid.Column="0" Content="{Binding Localization[resource.add]}" Click="BrowseResources_Click" />
+                <Button Grid.Column="1" Content="{Binding Localization[resource.remove]}" Click="RemoveResource_Click" />
+                <Button Grid.Column="2" Content="{Binding Localization[resource.clear]}" Click="ClearResources_Click" />
+                <Button Grid.Column="3" Content="{Binding Localization[resource.moveUp]}" Command="{Binding MoveResourceUpCommand}" IsEnabled="{Binding CanMoveResourceUp}" />
+                <Button Grid.Column="4" Content="{Binding Localization[resource.moveDown]}" Command="{Binding MoveResourceDownCommand}" IsEnabled="{Binding CanMoveResourceDown}" />
                 <TextBlock Grid.Column="5"
-                           Text="Top-to-bottom order is used for merge analysis."
+                           Text="{Binding Localization[resource.orderHint]}"
                            VerticalAlignment="Center"
                            Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
               </Grid>
@@ -205,15 +215,16 @@
                        SelectedItem="{Binding SelectedResourcePath, Mode=TwoWay}" />
             </Grid>
           </TabItem>
-          <TabItem Header="Summary">
+          <TabItem Header="{Binding Localization[tab.summary]}">
             <ListBox ItemsSource="{Binding SummaryLines}" />
           </TabItem>
-          <TabItem Header="Repack Map">
+          <TabItem Header="{Binding Localization[tab.repackMap]}">
             <Grid RowDefinitions="2*,4,*" RowSpacing="6" Margin="2">
               <ScrollViewer Grid.Row="0"
                             HorizontalScrollBarVisibility="Auto"
                             VerticalScrollBarVisibility="Auto">
                 <controls:RepackMapControl Report="{Binding RepackReport}"
+                                           Localization="{Binding Localization}"
                                            MinHeight="240" />
               </ScrollViewer>
               <GridSplitter Grid.Row="1"
@@ -243,16 +254,16 @@
               </ListBox>
             </Grid>
           </TabItem>
-          <TabItem Header="Warnings">
+          <TabItem Header="{Binding Localization[tab.warnings]}">
             <ListBox ItemsSource="{Binding Warnings}" />
           </TabItem>
-          <TabItem Header="Errors">
+          <TabItem Header="{Binding Localization[tab.errors]}">
             <ListBox ItemsSource="{Binding Errors}" />
           </TabItem>
           <!-- <TabItem Header="Files">
             <ListBox ItemsSource="{Binding Files}" />
           </TabItem> -->
-          <TabItem Header="Restore">
+          <TabItem Header="{Binding Localization[tab.restore]}">
             <Grid RowDefinitions="Auto,*" RowSpacing="10" Margin="2">
               <TextBox Grid.Row="0"
                        Text="{Binding RestoreSummaryText}"
@@ -284,7 +295,7 @@
               </ListBox>
             </Grid>
           </TabItem>
-          <TabItem Header="Log">
+          <TabItem Header="{Binding Localization[tab.log]}">
             <ListBox ItemsSource="{Binding LogLines}" >
               <ListBox.Styles>
                 <Style Selector="ListBoxItem">

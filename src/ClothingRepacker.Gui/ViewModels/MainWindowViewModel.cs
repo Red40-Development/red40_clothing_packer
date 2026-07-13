@@ -4,6 +4,7 @@ using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Reporting;
 using ClothingRepacker.Core.Scanning;
+using ClothingRepacker.Core.Localization;
 using ClothingRepacker.Gui.Models;
 using ClothingRepacker.Gui.Services;
 
@@ -16,6 +17,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     private readonly IRepackerWorkflow _workflow;
     private readonly IProjectStore _projectStore;
     private readonly IUpdateChecker? _updateChecker;
+    private readonly LocalizationService _localization;
     private CancellationTokenSource? _operationCts;
     private MergePlan? _lastPlan;
     private bool _hasSuccessfulBuild;
@@ -41,11 +43,11 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _copyResourcesToOutputBeforeRename = true;
     private bool _optimizeYmtUsage;
     private bool _isBusy;
-    private string _status = "Select clothing resource folders to begin.";
+    private string _status = string.Empty;
     private string _versionCheckText;
     private string _updateReleaseUrl = string.Empty;
     private bool _isUpdateAvailable;
-    private string _currentStage = "Idle";
+    private string _currentStage = string.Empty;
     private string _activePath = string.Empty;
     private int _progressCurrent;
     private int _progressTotal;
@@ -57,15 +59,22 @@ public sealed class MainWindowViewModel : ViewModelBase
     private IReadOnlyList<string> _restoreSummaryLines = [];
     private IReadOnlyList<string> _restoreActionLines = [];
     private string _restoreSummaryText = string.Empty;
+    private LocalizationOption? _selectedLanguage;
 
     public MainWindowViewModel(IRepackerWorkflow workflow, IProjectStore projectStore, IUpdateChecker? updateChecker = null)
     {
         _workflow = workflow;
         _projectStore = projectStore;
         _updateChecker = updateChecker;
+        _localization = new LocalizationService();
+        _localization.LanguageChanged += Localization_LanguageChanged;
+        LanguageOptions = _localization.GetOptions();
+        _selectedLanguage = LanguageOptions[0];
         CurrentVersion = AppVersion.FromInformationalVersion(
             typeof(MainWindowViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
-        _versionCheckText = $"Version {CurrentVersion.Display}";
+        _versionCheckText = T("version.current", Args(("version", CurrentVersion.Display)));
+        _status = T("status.initial");
+        _currentStage = T("status.idle");
 
         ExportXmlCommand = new AsyncRelayCommand(ExportXmlAsync, CanRunWithResources);
         AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, CanRunWithResources);
@@ -92,6 +101,24 @@ public sealed class MainWindowViewModel : ViewModelBase
     public RelayCommand MoveResourceDownCommand { get; }
 
     public event EventHandler? HelpRequested;
+
+    public LocalizationService Localization => _localization;
+    public IReadOnlyList<LocalizationOption> LanguageOptions { get; private set; }
+
+    public LocalizationOption? SelectedLanguage
+    {
+        get => _selectedLanguage;
+        set
+        {
+            if (!SetProperty(ref _selectedLanguage, value))
+            {
+                return;
+            }
+
+            _localization.OverrideLocale = value is { IsSystemDefault: false } ? value.Locale : null;
+            _ = _projectStore.SaveLanguageOverrideAsync(_localization.OverrideLocale);
+        }
+    }
 
     public ObservableCollection<string> SummaryLines { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
@@ -135,7 +162,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     }
 
     public string ProjectDisplayName => string.IsNullOrWhiteSpace(CurrentProjectPath)
-        ? "Unsaved project"
+        ? T("project.unsaved")
         : Path.GetFileNameWithoutExtension(CurrentProjectPath);
 
     public bool HasCurrentProject => !string.IsNullOrWhiteSpace(CurrentProjectPath);
@@ -462,6 +489,57 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void RequestHelp()
         => HelpRequested?.Invoke(this, EventArgs.Empty);
 
+    private string T(string key, IReadOnlyDictionary<string, object?>? arguments = null)
+        => _localization.Translate(key, arguments);
+
+    private static IReadOnlyDictionary<string, object?> Args(params (string Name, object? Value)[] values)
+        => values.ToDictionary(value => value.Name, value => value.Value, StringComparer.Ordinal);
+
+    private void Localization_LanguageChanged(object? sender, EventArgs e)
+    {
+        var selectedLocale = _selectedLanguage?.Locale;
+        LanguageOptions = _localization.GetOptions();
+        _selectedLanguage = LanguageOptions.FirstOrDefault(option =>
+            string.Equals(option.Locale, selectedLocale, StringComparison.OrdinalIgnoreCase))
+            ?? LanguageOptions[0];
+        OnPropertyChanged(nameof(LanguageOptions));
+        OnPropertyChanged(nameof(SelectedLanguage));
+        OnPropertyChanged(string.Empty);
+        RefreshLocalizedCollections();
+    }
+
+    private void RefreshLocalizedCollections()
+    {
+        if (_lastPlan is not null)
+        {
+            Warnings.Clear();
+            Errors.Clear();
+            foreach (var warning in LocalizeDiagnostics(_lastPlan.WarningDiagnostics, _lastPlan.Warnings))
+            {
+                Warnings.Add(warning);
+            }
+
+            foreach (var error in LocalizeDiagnostics(_lastPlan.ErrorDiagnostics, _lastPlan.Errors))
+            {
+                Errors.Add(error);
+            }
+            SetSummaryLines(T("summary.analyze"), Summary);
+            SetRepackReport(_lastPlan);
+        }
+
+        if (_restorePreview is not null)
+        {
+            SetRestorePreviewLines(_restorePreview);
+        }
+    }
+
+    private IReadOnlyList<string> LocalizeDiagnostics(
+        IReadOnlyList<LocalizedDiagnostic> diagnostics,
+        IReadOnlyList<string> legacy)
+        => diagnostics.Count > 0
+            ? diagnostics.Select(_localization.Translate).ToList()
+            : legacy;
+
     public void SelectResourcesFolder(string path)
     {
         AddResourceFolders([path]);
@@ -489,7 +567,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         SyncResourcesPath();
         EnsureDerivedPaths();
         ResetPlanState();
-        Status = $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected. Run Analyze to preview changes.";
+        Status = T("status.resourcesSelected", Args(("count", ResourcePaths.Count)));
     }
 
     public void AddResourceFoldersFromText(string text)
@@ -535,8 +613,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         EnsureDerivedPaths();
         ResetPlanState();
         Status = ResourcePaths.Count == 0
-            ? "Select clothing resource folders to begin."
-            : $"{ResourcePaths.Count} resource folder{(ResourcePaths.Count == 1 ? string.Empty : "s")} selected.";
+            ? T("status.initial")
+            : T("status.resourcesSelectedShort", Args(("count", ResourcePaths.Count)));
     }
 
     public void MoveSelectedResourceFolderUp()
@@ -555,11 +633,11 @@ public sealed class MainWindowViewModel : ViewModelBase
         SelectedResourcePath = null;
         SyncResourcesPath();
         ResetPlanState();
-        Status = "Select clothing resource folders to begin.";
+        Status = T("status.initial");
     }
 
     public async Task ExportXmlAsync()
-        => await RunOperationAsync("Exporting XML", async (progress, token) =>
+        => await RunOperationAsync(T("operation.exportingXml"), async (progress, token) =>
         {
             var writtenFiles = new List<string>();
             var skippedFiles = new List<string>();
@@ -577,12 +655,12 @@ public sealed class MainWindowViewModel : ViewModelBase
             }
 
             Summary = new WorkflowSummary(0, 0, 0, 0, 0, writtenFiles.Count, skippedFiles.Count);
-            SetSummaryLines("XML export", Summary);
-            Status = $"XML export complete. Wrote {writtenFiles.Count} file(s), skipped {skippedFiles.Count}.";
+            SetSummaryLines(T("summary.xmlExport"), Summary);
+            Status = T("status.exportComplete", Args(("written", writtenFiles.Count), ("skipped", skippedFiles.Count)));
         });
 
     public async Task AnalyzeAsync()
-        => await RunOperationAsync("Analyzing resources", async (progress, token) =>
+        => await RunOperationAsync(T("operation.analyzing"), async (progress, token) =>
         {
             var settings = new MergePlanSettings
             {
@@ -607,12 +685,12 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             Warnings.Clear();
             Errors.Clear();
-            foreach (var warning in result.Plan.Warnings)
+            foreach (var warning in LocalizeDiagnostics(result.Plan.WarningDiagnostics, result.Plan.Warnings))
             {
                 Warnings.Add(warning);
             }
 
-            foreach (var error in result.Plan.Errors)
+            foreach (var error in LocalizeDiagnostics(result.Plan.ErrorDiagnostics, result.Plan.Errors))
             {
                 Errors.Add(error);
             }
@@ -624,20 +702,20 @@ public sealed class MainWindowViewModel : ViewModelBase
                 result.Plan.Warnings.Count,
                 result.Plan.Errors.Count);
             SetRepackReport(result.Plan);
-            SetSummaryLines("Analyze", Summary);
+            SetSummaryLines(T("summary.analyze"), Summary);
             SelectedTabIndex = result.Plan.TargetCollections.Count > 0 ? 2 : 1;
             Status = result.Plan.Errors.Count == 0
-                ? "Analyze complete. Build Preview is available."
-                : $"Analyze complete with {result.Plan.Errors.Count} error(s). Fix errors before build/apply.";
+                ? T("status.analyzeComplete")
+                : T("status.analyzeErrors", Args(("count", result.Plan.Errors.Count)));
             RefreshCommands();
         });
 
     public async Task BuildPreviewAsync()
-        => await RunOperationAsync("Building preview", async (progress, token) =>
+        => await RunOperationAsync(T("operation.buildingPreview"), async (progress, token) =>
         {
             if (_lastPlan is null)
             {
-                throw new InvalidOperationException("Analyze must complete before building.");
+                throw new InvalidOperationException(T("error.analyzeBeforeBuild"));
             }
 
             var result = await _workflow.BuildAsync(_lastPlan, OutputPath, new BuildOptions
@@ -654,17 +732,17 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             _hasSuccessfulBuild = true;
             Summary = Summary with { WrittenFileCount = result.WrittenFiles.Count };
-            SetSummaryLines("Build Preview", Summary);
-            Status = $"Build preview complete. Wrote {result.WrittenFiles.Count} file(s) to {result.OutputRoot}.";
+            SetSummaryLines(T("summary.buildPreview"), Summary);
+            Status = T("status.buildComplete", Args(("count", result.WrittenFiles.Count), ("path", result.OutputRoot)));
             RefreshCommands();
         });
 
     public async Task ApplyAsync()
-        => await RunOperationAsync("Applying plan", async (progress, token) =>
+        => await RunOperationAsync(T("operation.applying"), async (progress, token) =>
         {
             if (_lastPlan is null)
             {
-                throw new InvalidOperationException("Analyze must complete before applying.");
+                throw new InvalidOperationException(T("error.analyzeBeforeApply"));
             }
 
             var entries = await _workflow.ApplyAsync(_lastPlan, BackupRoot, new ApplyOptions
@@ -674,16 +752,16 @@ public sealed class MainWindowViewModel : ViewModelBase
                 IncludeDebugClient = IncludeDebugClient,
             }, progress, token);
             Summary = Summary with { BackupEntryCount = entries.Count };
-            SetSummaryLines("Apply", Summary);
-            Status = $"Apply complete. Created {entries.Count} backup manifest entr{(entries.Count == 1 ? "y" : "ies")}.";
+            SetSummaryLines(T("summary.apply"), Summary);
+            Status = T("status.applyComplete", Args(("count", entries.Count)));
         });
 
     public async Task RestoreAsync()
-        => await RunOperationAsync("Restoring backup", async (progress, token) =>
+        => await RunOperationAsync(T("operation.restoring"), async (progress, token) =>
         {
             await _workflow.RestoreAsync(RestoreManifestPath, progress, token);
-            Status = "Restore complete.";
-            LogLines.Add($"Restored from {RestoreManifestPath}");
+            Status = T("status.restoreComplete");
+            LogLines.Add(T("log.restoredFrom", Args(("path", RestoreManifestPath))));
             await LoadRestoreManifestPreviewAsync(RestoreManifestPath, updateStatus: false);
         });
 
@@ -699,13 +777,13 @@ public sealed class MainWindowViewModel : ViewModelBase
             var settings = await _projectStore.LoadProjectAsync(projectPath);
             ApplyProjectSettings(settings, projectPath);
             await _projectStore.SaveLastProjectPathAsync(projectPath);
-            Status = $"Project loaded: {Path.GetFileName(projectPath)}";
+            Status = T("status.projectLoaded", Args(("name", Path.GetFileName(projectPath))));
         }
         catch (Exception ex)
         {
             Status = ex.Message;
             Errors.Add(ex.Message);
-            LogLines.Add($"Could not load project: {ex.Message}");
+            LogLines.Add(T("log.couldNotLoadProject", Args(("message", ex.Message))));
         }
     }
 
@@ -720,13 +798,13 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             await _projectStore.SaveProjectAsync(projectPath, CreateProjectSettings());
             CurrentProjectPath = projectPath;
-            Status = $"Project saved: {Path.GetFileName(projectPath)}";
+            Status = T("status.projectSaved", Args(("name", Path.GetFileName(projectPath))));
         }
         catch (Exception ex)
         {
             Status = ex.Message;
             Errors.Add(ex.Message);
-            LogLines.Add($"Could not save project: {ex.Message}");
+            LogLines.Add(T("log.couldNotSaveProject", Args(("message", ex.Message))));
         }
     }
 
@@ -747,13 +825,13 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         ApplyProjectSettings(new ProjectSettings(), string.Empty);
         await _projectStore.SaveLastProjectPathAsync(null);
-        Status = "Project cleared. Defaults restored.";
+        Status = T("status.projectCleared");
     }
 
     public void CancelOperation()
     {
         _operationCts?.Cancel();
-        Status = "Cancel requested. Waiting for the current step to stop.";
+        Status = T("status.cancelRequested");
     }
 
     public bool CanRunWithResources()
@@ -809,7 +887,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         SelectedResourcePath = selected;
         SyncResourcesPath();
         ResetPlanState();
-        Status = "Resource order updated. Run Analyze to preview changes.";
+        Status = T("status.resourceOrderUpdated");
     }
 
     private async Task RunOperationAsync(string status, Func<IProgress<OperationProgress>, CancellationToken, Task> operation)
@@ -821,7 +899,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         IsBusy = true;
         Status = status;
-        CurrentStage = "Starting";
+        CurrentStage = T("status.starting");
         ActivePath = string.Empty;
         ProgressCurrent = 0;
         ProgressTotal = 0;
@@ -835,8 +913,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            Status = "Operation canceled.";
-            LogLines.Add("Operation canceled.");
+            Status = T("status.canceled");
+            LogLines.Add(T("status.canceled"));
         }
         catch (Exception ex)
         {
@@ -844,17 +922,17 @@ public sealed class MainWindowViewModel : ViewModelBase
             Errors.Add(ex.Message);
             if (!string.IsNullOrWhiteSpace(ActivePath))
             {
-                LogLines.Add($"Active path when the error occurred: {ActivePath}");
+                LogLines.Add(T("log.activePath", Args(("path", ActivePath))));
             }
 
-            LogLines.Add($"Error: {ex}");
+            LogLines.Add(T("log.error", Args(("message", ex.ToString()))));
         }
       finally
         {
             _operationCts.Dispose();
             _operationCts = null;
             IsBusy = false;
-            CurrentStage = "Idle";
+            CurrentStage = T("status.idle");
             RefreshCommands();
         }
     }
@@ -873,33 +951,34 @@ public sealed class MainWindowViewModel : ViewModelBase
         }
     }
 
-    private static string FormatProgress(OperationProgress progress)
+    private string FormatProgress(OperationProgress progress)
     {
         var path = string.IsNullOrWhiteSpace(progress.Path) ? string.Empty : $" | {Path.GetFileName(progress.Path)}";
+        var message = progress.MessageKey is { } key ? T(key, progress.MessageArguments) : progress.Message;
         return progress.Stage switch
         {
-            "start" => progress.Message ?? $"{progress.Operation} started.",
-            "scan-resource" => progress.Message ?? $"Scanned {progress.Current}/{progress.Total} resources{path}",
-            "process-source" => $"Analyzed {progress.Current}/{progress.Total} | sources {progress.SourceCount} | warnings {progress.WarningCount} | errors {progress.ErrorCount}{path}",
-            "finalize-plan" => progress.Message ?? "Finalizing merge plan.",
-            "load-source" => progress.Message ?? $"Loading source YMT {progress.Current}/{progress.Total}{path}",
-            "build-target" => progress.Message ?? $"Building target collection {progress.Current}/{progress.Total}{path}",
-            "build-creature-metadata" => progress.Message ?? $"Building creature metadata {progress.Current}/{progress.Total}{path}",
-            "write-target" => $"Built {progress.Current}/{progress.Total} target collections | files {progress.WrittenFileCount}{path}",
-            "export-file" => $"Exported {progress.Current}/{progress.Total} | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
-            "copy-source-resource" => $"Copied {progress.Current}/{progress.Total} source resources{path}",
-            "copy-source-file" => $"Copied {progress.Current}/{progress.Total} source files{path}",
-            "copy-generated-file" => $"Copied {progress.Current}/{progress.Total} generated files{path}",
-            "rename-stream" => $"Renamed {progress.Current}/{progress.Total} stream files{path}",
-            "backup-source-ymt" => $"Backed up {progress.Current}/{progress.Total} source files{path}",
-            "remove-source-ymt" => $"Removed {progress.Current}/{progress.Total} source files from copy{path}",
-            "backup-source-metadata" => $"Backed up {progress.Current}/{progress.Total} source metadata files{path}",
-            "remove-source-metadata" => $"Removed {progress.Current}/{progress.Total} source metadata files from copy{path}",
-            "delete-generated-resource" => progress.Message ?? $"Removed generated resource {progress.Current}/{progress.Total}{path}",
-            "copy-backup-file" => progress.Message ?? $"Restored backup file {progress.Current}/{progress.Total}{path}",
-            "move-stream-file" => progress.Message ?? $"Moved stream file {progress.Current}/{progress.Total}{path}",
-            "complete" => progress.Message ?? $"{progress.Operation} complete.",
-            _ => progress.Message ?? $"{progress.Operation}: {progress.Stage}{path}",
+            "start" => message ?? T("progress.started", Args(("operation", progress.Operation))),
+            "scan-resource" => message ?? T("progress.scannedResources", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "process-source" => T("progress.processedSources", Args(("current", progress.Current), ("total", progress.Total), ("sources", progress.SourceCount), ("warnings", progress.WarningCount), ("errors", progress.ErrorCount), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "finalize-plan" => message ?? T("progress.finalizing"),
+            "load-source" => message ?? T("progress.loadingSource", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "build-target" => message ?? T("progress.buildingTarget", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "build-creature-metadata" => message ?? T("progress.buildingCreatureMetadata", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "write-target" => T("progress.wroteTargets", Args(("current", progress.Current), ("total", progress.Total), ("files", progress.WrittenFileCount), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "export-file" => T("progress.exportedFiles", Args(("current", progress.Current), ("total", progress.Total), ("written", progress.WrittenFileCount), ("skipped", progress.SkippedCount), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "copy-source-resource" => T("progress.copiedResources", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "copy-source-file" => T("progress.copiedSourceFiles", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "copy-generated-file" => T("progress.copiedGeneratedFiles", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "rename-stream" => T("progress.renamedStreams", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "backup-source-ymt" => T("progress.backedUpSourceFiles", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "remove-source-ymt" => T("progress.removedSourceFiles", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "backup-source-metadata" => T("progress.backedUpMetadata", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "remove-source-metadata" => T("progress.removedMetadata", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "delete-generated-resource" => message ?? T("progress.removedGeneratedResource", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "copy-backup-file" => message ?? T("progress.restoredBackupFile", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "move-stream-file" => message ?? T("progress.movedStreamFile", Args(("current", progress.Current), ("total", progress.Total), ("path", Path.GetFileName(progress.Path ?? string.Empty)))),
+            "complete" => message ?? T("progress.complete", Args(("operation", progress.Operation))),
+            _ => message ?? $"{progress.Operation}: {progress.Stage}{path}",
         };
     }
 
@@ -930,7 +1009,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             SelectedTabIndex = 5;
             if (updateStatus)
             {
-                Status = $"Backup manifest loaded. {preview.Actions.Count} restore action(s) ready.";
+                Status = T("status.backupManifestLoaded", Args(("count", preview.Actions.Count)));
             }
             OnPropertyChanged(nameof(HasRestoreManifestPreview));
         }
@@ -941,9 +1020,9 @@ public sealed class MainWindowViewModel : ViewModelBase
                 return;
             }
 
-            RestoreSummaryLines = [$"Could not load restore manifest: {ex.Message}"];
+            RestoreSummaryLines = [T("status.couldNotLoadRestoreManifest", Args(("message", ex.Message)))];
             Status = ex.Message;
-            LogLines.Add($"Could not load restore manifest: {ex.Message}");
+            LogLines.Add(T("status.couldNotLoadRestoreManifest", Args(("message", ex.Message))));
         }
         finally
         {
@@ -958,18 +1037,18 @@ public sealed class MainWindowViewModel : ViewModelBase
         var moveCount = preview.Actions.Count(action => action.Kind == "move-stream-file");
         var summaryLines = new List<string>
         {
-            "Restore summary",
-            $"Manifest: {preview.ManifestPath}",
-            $"Manifest entries: {preview.Entries.Count}",
-            $"Actions: {preview.Actions.Count}",
-            $"Generated resources to remove: {deleteCount}",
-            $"Backup files to copy back: {copyCount}",
-            $"Stream files to move back: {moveCount}",
+            T("restore.summary"),
+            T("restore.manifest", Args(("path", preview.ManifestPath))),
+            T("restore.manifestEntries", Args(("count", preview.Entries.Count))),
+            T("restore.actions", Args(("count", preview.Actions.Count))),
+            T("restore.generatedResources", Args(("count", deleteCount))),
+            T("restore.backupFiles", Args(("count", copyCount))),
+            T("restore.streamFiles", Args(("count", moveCount))),
         };
 
         if (preview.SkippedActions.Count > 0)
         {
-            summaryLines.Add($"Skipped nested/generated entries: {preview.SkippedActions.Count}");
+            summaryLines.Add(T("restore.skippedNested", Args(("count", preview.SkippedActions.Count))));
         }
 
         var actionLines = new List<string>(preview.Actions.Count + preview.SkippedActions.Count + 1);
@@ -980,10 +1059,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (preview.SkippedActions.Count > 0)
         {
-            actionLines.Add("Skipped entries");
+            actionLines.Add(T("restore.skippedEntries"));
             foreach (var action in preview.SkippedActions)
             {
-                actionLines.Add($"Skip: {FormatRestoreAction(action)}");
+                actionLines.Add(T("restore.skip", Args(("text", FormatRestoreAction(action)))));
             }
         }
 
@@ -995,7 +1074,7 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         RepackReport = new YmtRepackReportBuilder().Build(plan);
         RepackReportLines.Clear();
-        var text = new YmtRepackReportFormatter().Format(RepackReport);
+        var text = new YmtRepackReportFormatter(_localization).Format(RepackReport);
         foreach (var line in text.Split(Environment.NewLine))
         {
             RepackReportLines.Add(line);
@@ -1007,12 +1086,12 @@ public sealed class MainWindowViewModel : ViewModelBase
         RestoreSummaryText = string.Join(Environment.NewLine, RestoreSummaryLines);
     }
 
-    private static string FormatRestoreAction(RestoreAction action)
+    private string FormatRestoreAction(RestoreAction action)
         => action.Kind switch
         {
-            "delete-generated-resource" => $"Remove generated resource: {action.DestinationPath}",
-            "copy-backup-file" => $"Copy backup: {action.SourcePath} -> {action.DestinationPath}",
-            "move-stream-file" => $"Move stream file: {action.SourcePath} -> {action.DestinationPath}",
+            "delete-generated-resource" => T("restore.removeGenerated", Args(("path", action.DestinationPath))),
+            "copy-backup-file" => T("restore.copyBackup", Args(("source", action.SourcePath), ("destination", action.DestinationPath))),
+            "move-stream-file" => T("restore.moveStream", Args(("source", action.SourcePath), ("destination", action.DestinationPath))),
             _ => action.Description,
         };
 
@@ -1086,25 +1165,25 @@ public sealed class MainWindowViewModel : ViewModelBase
     private void SetSummaryLines(string title, WorkflowSummary summary)
     {
         SummaryLines.Clear();
-        SummaryLines.Add($"{title} summary");
-        SummaryLines.Add($"Source YMTs: {summary.SourceYmtCount}");
-        SummaryLines.Add($"Target collections: {summary.TargetCollectionCount}");
-        SummaryLines.Add($"Stream renames: {summary.StreamRenameCount}");
-        SummaryLines.Add($"Warnings: {summary.WarningCount}");
-        SummaryLines.Add($"Errors: {summary.ErrorCount}");
+        SummaryLines.Add(T("summary.title", Args(("title", title))));
+        SummaryLines.Add(T("summary.sourceYmts", Args(("count", summary.SourceYmtCount))));
+        SummaryLines.Add(T("summary.targetCollections", Args(("count", summary.TargetCollectionCount))));
+        SummaryLines.Add(T("summary.streamRenames", Args(("count", summary.StreamRenameCount))));
+        SummaryLines.Add(T("summary.warnings", Args(("count", summary.WarningCount))));
+        SummaryLines.Add(T("summary.errors", Args(("count", summary.ErrorCount))));
         if (summary.WrittenFileCount > 0)
         {
-            SummaryLines.Add($"Written files: {summary.WrittenFileCount}");
+            SummaryLines.Add(T("summary.writtenFiles", Args(("count", summary.WrittenFileCount))));
         }
 
         if (summary.SkippedFileCount > 0)
         {
-            SummaryLines.Add($"Skipped files: {summary.SkippedFileCount}");
+            SummaryLines.Add(T("summary.skippedFiles", Args(("count", summary.SkippedFileCount))));
         }
 
         if (summary.BackupEntryCount > 0)
         {
-            SummaryLines.Add($"Backup entries: {summary.BackupEntryCount}");
+            SummaryLines.Add(T("summary.backupEntries", Args(("count", summary.BackupEntryCount))));
         }
     }
 
@@ -1112,15 +1191,23 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         try
         {
+            var languageOverride = await _projectStore.LoadLanguageOverrideAsync();
+            if (!string.IsNullOrWhiteSpace(languageOverride) && _localization.Catalogs.Any(catalog => catalog.Locale.Equals(languageOverride, StringComparison.OrdinalIgnoreCase)))
+            {
+                _localization.OverrideLocale = languageOverride;
+                _selectedLanguage = LanguageOptions.FirstOrDefault(option => option.Locale?.Equals(languageOverride, StringComparison.OrdinalIgnoreCase) == true);
+                OnPropertyChanged(nameof(SelectedLanguage));
+            }
+
             var project = await _projectStore.LoadLastProjectAsync();
             ApplyProjectSettings(project.Settings, project.ProjectPath);
             Status = string.IsNullOrWhiteSpace(project.ProjectPath)
                 ? Status
-                : $"Project loaded: {Path.GetFileName(project.ProjectPath)}";
+                : T("status.projectLoaded", Args(("name", Path.GetFileName(project.ProjectPath))));
         }
         catch (Exception ex)
         {
-            LogLines.Add($"Could not load project: {ex.Message}");
+            LogLines.Add(T("log.couldNotLoadProject", Args(("message", ex.Message))));
         }
     }
 
@@ -1131,7 +1218,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             return;
         }
 
-        VersionCheckText = $"Version {CurrentVersion.Display} - checking for updates";
+        VersionCheckText = T("version.checking", Args(("version", CurrentVersion.Display)));
 
         try
         {
@@ -1139,19 +1226,19 @@ public sealed class MainWindowViewModel : ViewModelBase
             var result = await _updateChecker.CheckAsync(CurrentVersion, cts.Token);
             if (result is { IsUpdateAvailable: true })
             {
-                VersionCheckText = $"Version {CurrentVersion.Display} - latest {result.LatestVersion.Display}";
+                VersionCheckText = T("version.latest", Args(("version", CurrentVersion.Display), ("latest", result.LatestVersion.Display)));
                 UpdateReleaseUrl = result.ReleaseUrl;
                 IsUpdateAvailable = true;
                 return;
             }
 
-            VersionCheckText = $"Version {CurrentVersion.Display} - up to date";
+            VersionCheckText = T("version.upToDate", Args(("version", CurrentVersion.Display)));
             IsUpdateAvailable = false;
             UpdateReleaseUrl = string.Empty;
         }
         catch
         {
-            VersionCheckText = $"Version {CurrentVersion.Display} - update check unavailable";
+            VersionCheckText = T("version.unavailable", Args(("version", CurrentVersion.Display)));
             IsUpdateAvailable = false;
             UpdateReleaseUrl = string.Empty;
         }

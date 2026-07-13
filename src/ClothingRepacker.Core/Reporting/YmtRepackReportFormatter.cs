@@ -1,9 +1,17 @@
 using System.Text;
+using ClothingRepacker.Core.Localization;
 
 namespace ClothingRepacker.Core.Reporting;
 
 public sealed class YmtRepackReportFormatter
 {
+    private readonly LocalizationService _localization;
+
+    public YmtRepackReportFormatter(LocalizationService? localization = null)
+    {
+        _localization = localization ?? new LocalizationService();
+    }
+
     public string Format(YmtRepackReport report)
     {
         var segments = report.Targets
@@ -18,13 +26,13 @@ public sealed class YmtRepackReportFormatter
         var sb = new StringBuilder();
         if (segments.Count == 0)
         {
-            sb.AppendLine("No YMT repack mappings.");
+            sb.AppendLine(T("report.noMappings"));
         }
         else
         {
             var rows = segments.Select(segment => new ReportRow(
                 Target: segment.TargetFullCollection,
-                Kind: segment.Kind == YmtRepackLaneKind.Component ? "component" : "prop",
+                Kind: segment.Kind == YmtRepackLaneKind.Component ? T("report.component") : T("report.prop"),
                 Slot: $"{segment.SlotId} {segment.SlotName}",
                 SourceResource: segment.SourceResource,
                 SourceYmt: segment.SourceYmtPath,
@@ -34,17 +42,17 @@ public sealed class YmtRepackReportFormatter
 
             var widths = new[]
             {
-                Math.Max("Target".Length, rows.Max(row => row.Target.Length)),
-                Math.Max("Kind".Length, rows.Max(row => row.Kind.Length)),
-                Math.Max("Slot".Length, rows.Max(row => row.Slot.Length)),
-                Math.Max("Source Resource".Length, rows.Max(row => row.SourceResource.Length)),
-                Math.Max("Source YMT".Length, rows.Max(row => row.SourceYmt.Length)),
-                Math.Max("Old Range".Length, rows.Max(row => row.OldRange.Length)),
-                Math.Max("New Range".Length, rows.Max(row => row.NewRange.Length)),
-                Math.Max("Count".Length, rows.Max(row => row.Count.Length)),
+                Math.Max(T("report.target").Length, rows.Max(row => row.Target.Length)),
+                Math.Max(T("report.kind").Length, rows.Max(row => row.Kind.Length)),
+                Math.Max(T("report.slot").Length, rows.Max(row => row.Slot.Length)),
+                Math.Max(T("report.sourceResource").Length, rows.Max(row => row.SourceResource.Length)),
+                Math.Max(T("report.sourceYmt").Length, rows.Max(row => row.SourceYmt.Length)),
+                Math.Max(T("report.oldRange").Length, rows.Max(row => row.OldRange.Length)),
+                Math.Max(T("report.newRange").Length, rows.Max(row => row.NewRange.Length)),
+                Math.Max(T("report.count").Length, rows.Max(row => row.Count.Length)),
             };
 
-            AppendRow(sb, widths, "Target", "Kind", "Slot", "Source Resource", "Source YMT", "Old Range", "New Range", "Count");
+            AppendRow(sb, widths, T("report.target"), T("report.kind"), T("report.slot"), T("report.sourceResource"), T("report.sourceYmt"), T("report.oldRange"), T("report.newRange"), T("report.count"));
             AppendSeparator(sb, widths);
             foreach (var row in rows)
             {
@@ -57,13 +65,13 @@ public sealed class YmtRepackReportFormatter
         return sb.ToString().TrimEnd();
     }
 
-    private static void AppendCreatureMetadataSection(StringBuilder sb, YmtRepackReport report)
+    private void AppendCreatureMetadataSection(StringBuilder sb, YmtRepackReport report)
     {
         sb.AppendLine();
-        sb.AppendLine("Creature metadata sources");
+        sb.AppendLine(T("report.creatureMetadataSources"));
         if (report.CreatureMetadataSources.Count == 0)
         {
-            sb.AppendLine("  None detected.");
+            sb.AppendLine($"  {T("report.noneDetected")}");
         }
         else
         {
@@ -73,42 +81,49 @@ public sealed class YmtRepackReportFormatter
                     .Append(source.Resource)
                     .Append(" | ")
                     .Append(source.MetadataPath)
-                    .Append(" | YMTs: ")
+                    .Append(" | ")
+                    .Append(T("report.ymts"))
+                    .Append(": ")
                     .Append(source.SourceYmtPaths.Count)
                     .Append(" [")
                     .Append(string.Join(", ", source.SourceYmtPaths))
                     .Append("]")
-                    .Append(" | expressions: ")
+                    .Append(" | ")
+                    .Append(T("report.expressions"))
+                    .Append(": ")
                     .Append(source.ComponentExpressionCount)
-                    .Append(" component, ")
+                    .Append(' ')
+                    .Append(T("report.component"))
+                    .Append(", ")
                     .Append(source.PropExpressionCount)
-                    .AppendLine(" prop");
+                    .Append(' ')
+                    .AppendLine(T("report.prop"));
             }
         }
 
-        sb.AppendLine("Creature metadata targets");
+        sb.AppendLine(T("report.creatureMetadataTargets"));
         if (report.CreatureMetadataTargets.Count == 0)
         {
-            sb.AppendLine("  None planned.");
+            sb.AppendLine($"  {T("report.none")}");
             return;
         }
 
         foreach (var target in report.CreatureMetadataTargets)
         {
             var status = target.IsUnnecessaryOutput
-                ? "UNNECESSARY OUTPUT"
+                ? T("map.unnecessaryOutput")
                 : target.IsMissingOutput
-                    ? "MISSING OUTPUT"
+                    ? T("map.missingOutput")
                     : target.IsRequired
-                        ? "required"
-                        : "not required";
+                        ? T("map.required")
+                        : T("map.notRequired");
             var output = target.OutputName is null
-                ? "output: none"
-                : $"output: {target.OutputName} [{target.OutputYmtPath}]";
+                ? T("report.outputNone")
+                : T("report.output", new Dictionary<string, object?> { ["name"] = target.OutputName, ["path"] = target.OutputYmtPath });
             var sources = target.SourceMetadataPaths.Count == 0
-                ? "source metadata: none"
-                : $"source metadata: {string.Join(", ", target.SourceMetadataPaths)}";
-            var repair = target.HasRepairHints ? ", repair hints: yes" : string.Empty;
+                ? T("report.sourceMetadataNone")
+                : T("report.sourceMetadata", new Dictionary<string, object?> { ["paths"] = string.Join(", ", target.SourceMetadataPaths) });
+            var repair = target.HasRepairHints ? T("report.repairHints") : string.Empty;
             sb.Append("  ")
                 .Append(target.TargetFullCollection)
                 .Append(" | ")
@@ -160,4 +175,7 @@ public sealed class YmtRepackReportFormatter
         string OldRange,
         string NewRange,
         string Count);
+
+    private string T(string key, IReadOnlyDictionary<string, object?>? arguments = null)
+        => _localization.Translate(key, arguments);
 }

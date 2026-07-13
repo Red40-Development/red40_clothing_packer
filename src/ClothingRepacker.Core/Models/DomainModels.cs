@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using ClothingRepacker.Core.Localization;
 
 namespace ClothingRepacker.Core.Models;
 
@@ -219,6 +220,8 @@ public sealed class MergePlan
     public List<SourceManifestWarning> SourceManifestWarnings { get; init; } = [];
     public List<string> Warnings { get; init; } = [];
     public List<string> Errors { get; init; } = [];
+    public List<LocalizedDiagnostic> WarningDiagnostics { get; init; } = [];
+    public List<LocalizedDiagnostic> ErrorDiagnostics { get; init; } = [];
     public List<SourceCreatureMetadataSummary> SourceCreatureMetadata { get; init; } = [];
     public List<CreatureMetadataOutputPlan> CreatureMetadataOutputs { get; init; } = [];
     public List<SourceAlternateMetadataSummary> SourceAlternateMetadata { get; init; } = [];
@@ -239,7 +242,8 @@ public sealed class MergePlanSettings
 public sealed record ValidationMessage(
     ValidationSeverity Severity,
     string Code,
-    string Message);
+    string Message,
+    IReadOnlyDictionary<string, object?>? Arguments = null);
 
 public enum ValidationSeverity
 {

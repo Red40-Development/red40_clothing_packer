@@ -44,7 +44,7 @@ public partial class MainWindow : Window
 
     private async void BrowseResources_Click(object? sender, RoutedEventArgs e)
     {
-        var paths = await PickFoldersAsync("Select clothing resource folders", allowMultiple: true);
+        var paths = await PickFoldersAsync(T("dialog.selectResources"), allowMultiple: true);
         if (paths.Count > 0)
         {
             ViewModel?.AddResourceFolders(paths);
@@ -59,7 +59,7 @@ public partial class MainWindow : Window
 
     private async void OpenProject_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await OpenFileAsync("Open project", "Project files", ["json"]);
+        var path = await OpenFileAsync(T("dialog.openProject"), T("dialog.projectFiles"), ["json"]);
         if (path is not null && ViewModel is { } vm)
         {
             await vm.LoadProjectAsync(path);
@@ -100,7 +100,7 @@ public partial class MainWindow : Window
 
     private async void BrowseOutput_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await PickFolderAsync("Select output root folder");
+        var path = await PickFolderAsync(T("dialog.selectOutput"));
         if (path is not null && ViewModel is { } vm)
         {
             vm.OutputPath = path;
@@ -109,7 +109,7 @@ public partial class MainWindow : Window
 
     private async void BrowseBackup_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await PickFolderAsync("Select backup root folder");
+        var path = await PickFolderAsync(T("dialog.selectBackup"));
         if (path is not null && ViewModel is { } vm)
         {
             vm.BackupRoot = path;
@@ -118,7 +118,7 @@ public partial class MainWindow : Window
 
     private async void BrowsePlan_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await SaveFileAsync("Save plan JSON", "plan.json");
+        var path = await SaveFileAsync(T("dialog.savePlan"), "plan.json");
         if (path is not null && ViewModel is { } vm)
         {
             vm.PlanPath = path;
@@ -127,7 +127,7 @@ public partial class MainWindow : Window
 
     private async void BrowseRestoreManifest_Click(object? sender, RoutedEventArgs e)
     {
-        var path = await OpenFileAsync("Select backup manifest", "JSON files", ["json"]);
+        var path = await OpenFileAsync(T("dialog.selectManifest"), T("dialog.jsonFiles"), ["json"]);
         if (path is not null && ViewModel is { } vm)
         {
             vm.RestoreManifestPath = path;
@@ -155,14 +155,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        await OpenExternalUrlAsync(vm.UpdateReleaseUrl, "Could not open update");
+        await OpenExternalUrlAsync(vm.UpdateReleaseUrl, T("dialog.couldNotOpenUpdate"));
     }
 
     private async void StoreLogo_Click(object? sender, RoutedEventArgs e)
-        => await OpenExternalUrlAsync(StoreUrl, "Could not open store");
+        => await OpenExternalUrlAsync(StoreUrl, T("dialog.couldNotOpenStore"));
 
     private async void TeamSupport_Click(object? sender, RoutedEventArgs e)
-        => await OpenExternalUrlAsync(TeamSupportUrl, "Could not open support page");
+        => await OpenExternalUrlAsync(TeamSupportUrl, T("dialog.couldNotOpenSupport"));
 
     private void DragOver(object? sender, DragEventArgs e)
     {
@@ -212,7 +212,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await ShowMessageAsync("Folder required", "Drop resource folder paths or clothing resource folders.");
+        await ShowMessageAsync(T("dialog.folderRequired"), T("dialog.dropFolder"));
     }
 
     private static bool HasSupportedDropData(DragEventArgs e)
@@ -291,7 +291,7 @@ public partial class MainWindow : Window
 
     private async Task SaveProjectAsAsync(MainWindowViewModel vm)
     {
-        var path = await SaveFileAsync("Save project", "clothing-repacker-project.json");
+        var path = await SaveFileAsync(T("dialog.saveProject"), "clothing-repacker-project.json");
         if (path is not null)
         {
             await vm.SaveProjectAsync(path);
@@ -303,7 +303,7 @@ public partial class MainWindow : Window
         var dialogContent = BuildApplyDialogContent(vm);
         var dialog = new Window
         {
-            Title = "Apply plan",
+            Title = vm.Localization.Translate("dialog.applyPlan"),
             Width = 520,
             Height = 250,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -325,11 +325,12 @@ public partial class MainWindow : Window
 
     private static ApplyDialogContent BuildApplyDialogContent(MainWindowViewModel vm)
     {
-        var cancelButton = new Button { Content = "Cancel" };
-        var applyButton = new Button { Content = "Apply" };
+        var localization = vm.Localization;
+        var cancelButton = new Button { Content = localization.Translate("button.cancel") };
+        var applyButton = new Button { Content = localization.Translate("button.apply") };
         var modeMessage = vm.CopyResourcesToOutputBeforeRename
-            ? "Apply will copy source resources into the output root, rename stream files in that copy, remove copied merged source YMT files after backing them up, and copy generated resources into place. Original resources will not be renamed."
-            : "Apply will rename stream files, remove merged source YMT files after backing them up, and copy generated resources into place.";
+            ? localization.Translate("dialog.applyCopyMode")
+            : localization.Translate("dialog.applyInPlace");
         var panel = new StackPanel
         {
             Margin = new Avalonia.Thickness(18),
@@ -341,9 +342,9 @@ public partial class MainWindow : Window
                     Text = modeMessage,
                     TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                 },
-                new TextBlock { Text = $"Backup root: {vm.BackupRoot}", TextWrapping = Avalonia.Media.TextWrapping.Wrap },
-                new TextBlock { Text = $"Planned stream renames: {vm.Summary.StreamRenameCount}" },
-                new TextBlock { Text = $"Planned source backups: {vm.PlannedBackupCount}" },
+                new TextBlock { Text = localization.Translate("dialog.backupRoot", new Dictionary<string, object?> { ["path"] = vm.BackupRoot }), TextWrapping = Avalonia.Media.TextWrapping.Wrap },
+                new TextBlock { Text = localization.Translate("dialog.plannedRenames", new Dictionary<string, object?> { ["count"] = vm.Summary.StreamRenameCount }) },
+                new TextBlock { Text = localization.Translate("dialog.plannedBackups", new Dictionary<string, object?> { ["count"] = vm.PlannedBackupCount }) },
                 new StackPanel
                 {
                     Orientation = Avalonia.Layout.Orientation.Horizontal,
@@ -367,7 +368,7 @@ public partial class MainWindow : Window
     {
         var closeButton = new Button
         {
-            Content = "OK",
+            Content = T("dialog.ok"),
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
         };
         var supportLinkButton = new Button
@@ -380,7 +381,7 @@ public partial class MainWindow : Window
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left,
             Content = new TextBlock
             {
-                Text = "Red40 Support",
+                Text = T("dialog.support"),
                 TextDecorations = Avalonia.Media.TextDecorations.Underline,
                 Foreground = Avalonia.Media.Brush.Parse("#2B6CB0"),
             },
@@ -388,7 +389,7 @@ public partial class MainWindow : Window
 
         var dialog = new Window
         {
-            Title = "How to use Red40 Clothing Repacker",
+            Title = T("dialog.helpTitle"),
             Width = 560,
             Height = 370,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
@@ -401,16 +402,12 @@ public partial class MainWindow : Window
                 {
                     new TextBlock
                     {
-                        Text = "Basic workflow",
+                        Text = T("dialog.basicWorkflow"),
                         FontWeight = Avalonia.Media.FontWeight.SemiBold,
                     },
                     new TextBlock
                     {
-                        Text = "1. Add one or more clothing resource folders with Add Resource or drag and drop.\n"
-                               + "2. Set the merged resource name, target prefix, output location, and backup location.\n"
-                               + "3. Click Analyze and review the Summary, Warnings, and Errors tabs.\n"
-                               + "4. Click Build Preview to generate the merged output and inspect the results.\n"
-                               + "5. Click Apply when ready. Backups are written before source files are changed.",
+                        Text = T("dialog.helpSteps"),
                         TextWrapping = Avalonia.Media.TextWrapping.Wrap,
                     },
                     new StackPanel
@@ -421,7 +418,7 @@ public partial class MainWindow : Window
                         {
                             new TextBlock
                             {
-                                Text = "Need more help or have feature suggestions?",
+                                Text = T("dialog.moreHelp"),
                                 VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
                             },
                             supportLinkButton,
@@ -432,7 +429,7 @@ public partial class MainWindow : Window
             }
         };
 
-        supportLinkButton.Click += async (_, _) => await OpenExternalUrlAsync(SupportUrl, "Could not open support");
+        supportLinkButton.Click += async (_, _) => await OpenExternalUrlAsync(SupportUrl, T("dialog.couldNotOpenSupportShort"));
         closeButton.Click += (_, _) => dialog.Close();
 
         await dialog.ShowDialog(this);
@@ -471,7 +468,7 @@ public partial class MainWindow : Window
                     new TextBlock { Text = message, TextWrapping = Avalonia.Media.TextWrapping.Wrap },
                     new Button
                     {
-                        Content = "OK",
+                        Content = T("dialog.ok"),
                         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Right,
                     }
                 }
@@ -485,4 +482,7 @@ public partial class MainWindow : Window
 
         await dialog.ShowDialog(this);
     }
+
+    private string T(string key, IReadOnlyDictionary<string, object?>? arguments = null)
+        => ViewModel?.Localization.Translate(key, arguments) ?? key;
 }

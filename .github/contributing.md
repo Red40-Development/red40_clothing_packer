@@ -25,6 +25,16 @@ You can use your own editor of choice, but we recommend using [VSCode](https://c
 
 When opening a pull request, make sure to follow the template and explain your changes. If you are trying to contribute something related to a GitHub issue, make sure to mention it as well.
 
+### Translations
+
+Translations live in `src/ClothingRepacker.Core/Localization/Locales/`. To add a language, copy `en.json`, change `locale` and `displayName`, and translate every value under `translations`. Keep the keys and `{placeholder}` names unchanged. The application discovers valid catalogs automatically; no code changes are needed.
+
+Validate catalogs locally with:
+
+```bash
+python3 scripts/validate-localization.py
+```
+
 ## Code Conventions
 
 Below are conventions that you must follow when contributing code.

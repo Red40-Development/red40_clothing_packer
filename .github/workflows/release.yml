@@ -54,6 +54,9 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      - name: Validate localization catalogs
+        run: python3 scripts/validate-localization.py
+
       - name: Publish CLI Linux x64
         run: >
           dotnet publish "$CLI_PROJECT"
