@@ -15,7 +15,7 @@ It supports:
 Like this tool and want to support further development? Checkout our store [Red40 Development](https://red40.dev/scripts)
 
 # NEW COMPONENT LIMIT PER YMT
-As of [this commit](https://github.com/citizenfx/fivem/commit/a6f68afb776e6df44a56816efecfef46fdceb36f) the limit per component for YMTs has been increased to 256. You can increase it in the advanced section of the gui or via the cli option documented below. I won't change this default for a little while in case the change is reverted.
+As of [this commit](https://github.com/citizenfx/fivem/commit/a6f68afb776e6df44a56816efecfef46fdceb36f) the limit per component for YMTs has been increased to 255. You can increase it in the advanced section of the gui or via the cli option documented below. I won't change this default for a little while in case the change is reverted.
 
 ## New GUI now available
 
