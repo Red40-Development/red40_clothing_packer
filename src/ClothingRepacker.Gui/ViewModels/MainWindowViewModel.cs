@@ -1025,9 +1025,10 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         var firstResourcePath = ResourcePaths[0];
         var parent = Directory.GetParent(firstResourcePath)?.FullName ?? firstResourcePath;
+        var defaultRoot = Directory.GetParent(parent)?.FullName ?? parent;
         var defaultOutputRoot = CopyResourcesToOutputBeforeRename
-            ? Path.Combine(parent, DefaultCopyOutputFolderName)
-            : parent;
+            ? Path.Combine(defaultRoot, DefaultCopyOutputFolderName)
+            : defaultRoot;
         if (string.IsNullOrWhiteSpace(OutputPath))
         {
             OutputPath = defaultOutputRoot;
@@ -1040,7 +1041,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         if (string.IsNullOrWhiteSpace(BackupRoot))
         {
-            BackupRoot = Path.Combine(parent, "backups");
+            BackupRoot = Path.Combine(defaultRoot, "backups");
         }
 
         if (string.IsNullOrWhiteSpace(PlanPath))

@@ -17,13 +17,14 @@ public class GuiWorkflowTests
         vm.SelectResourcesFolder(root);
 
         var parent = Directory.GetParent(root)!.FullName;
-        var outputRoot = Path.Combine(parent, "red40_output");
+        var defaultRoot = Directory.GetParent(parent)!.FullName;
+        var outputRoot = Path.Combine(defaultRoot, "red40_output");
 
         Assert.Equal(root, vm.ResourcesPath);
         Assert.Equal([root], vm.ResourcePaths.ToArray());
         Assert.Equal(outputRoot, vm.OutputPath);
         Assert.Equal(outputRoot, vm.GeneratedResourcesRoot);
-        Assert.Equal(Path.Combine(parent, "backups"), vm.BackupRoot);
+        Assert.Equal(Path.Combine(defaultRoot, "backups"), vm.BackupRoot);
         Assert.Equal(Path.Combine(parent, "plan.json"), vm.PlanPath);
     }
 
@@ -37,7 +38,8 @@ public class GuiWorkflowTests
         };
         var vm = CreateViewModel(workflow);
         vm.SelectResourcesFolder(root);
-        var outputRoot = Path.Combine(Directory.GetParent(root)!.FullName, "red40_output");
+        var parent = Directory.GetParent(root)!.FullName;
+        var outputRoot = Path.Combine(Directory.GetParent(parent)!.FullName, "red40_output");
 
         await vm.AnalyzeAsync();
 
