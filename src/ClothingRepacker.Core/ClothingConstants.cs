@@ -6,8 +6,8 @@ public static class ClothingConstants
 {
     public const int ComponentSlotCount = 12;
     public const int MissingComponent = 255;
-    public const int DefaultMaxDrawablesPerComponent = 128;
-    public const int DefaultMaxDrawablesPerProp = 255;
+    public const int DefaultMaxDrawablesPerComponent = 256;
+    public const int DefaultMaxDrawablesPerProp = 256;
 
     public static readonly IReadOnlyDictionary<int, string> ComponentPrefixes =
         new ReadOnlyDictionary<int, string>(new Dictionary<int, string>

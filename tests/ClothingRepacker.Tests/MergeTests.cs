@@ -68,6 +68,46 @@ public class MergeTests
             .Sum(range => range.Count)));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ComponentAndPropLimitsUseAllIndicesThrough255(bool optimizeYmtUsage)
+    {
+        var planner = new MergePlanner();
+        var settings = new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 256,
+            MaxDrawablesPerProp = 256,
+            OptimizeYmtUsage = optimizeYmtUsage,
+        };
+        var first = CreateSourceYmt("component-limit-a", new Dictionary<int, int> { [0] = 128 }, new Dictionary<int, int> { [0] = 128 });
+        var second = CreateSourceYmt("component-limit-b", new Dictionary<int, int> { [0] = 128 }, new Dictionary<int, int> { [0] = 128 });
+
+        var outputs = planner.Plan([first, second], settings, [], []);
+
+        var output = Assert.Single(outputs);
+        Assert.Equal(256, output.ComponentCounts[0]);
+        Assert.Equal(256, output.PropCounts[0]);
+        Assert.Equal(256, output.Contributions
+            .Where(contribution => contribution.ComponentRanges.ContainsKey(0))
+            .Sum(contribution => contribution.ComponentRanges[0].Count));
+
+        var builder = new OutputCollectionBuilder(
+            output.CollectionName,
+            output.FullCollectionName,
+            output.PedBaseName,
+            output.Gender);
+        var drawableMappings = output.Contributions
+            .SelectMany(contribution => builder.AddComponents(contribution.Source, contribution.ComponentRanges))
+            .ToList();
+        var propMappings = output.Contributions
+            .SelectMany(contribution => builder.AddProps(contribution.Source, contribution.PropRanges))
+            .ToList();
+
+        Assert.Equal(Enumerable.Range(0, 256), drawableMappings.Select(mapping => mapping.NewDrawableIndex));
+        Assert.Equal(Enumerable.Range(0, 256), propMappings.Select(mapping => mapping.NewPropIndex));
+    }
+
     [Fact]
     public void OptimizedPlannerCanSplitSourceLanesToReduceTargetCollections()
     {

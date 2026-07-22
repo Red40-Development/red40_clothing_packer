@@ -67,11 +67,11 @@ If you are running from source, use `dotnet run --project src/ClothingRepacker.C
 
 ```bash
 ClothingRepacker.Cli analyze --resources <path> --target-resource <name> --out <plan.json>
-  [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--max-drawables-per-component <256>] [--max-drawables-per-prop <256>]
   [--optimize-ymt-usage]
 ClothingRepacker.Cli analyze --resource <path_to_resource> [--resource <path_to_resource> ...]
   --generated-root <folder> --target-resource <name> --out <plan.json>
-  [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--max-drawables-per-component <256>] [--max-drawables-per-prop <256>]
   [--optimize-ymt-usage]
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>

@@ -251,7 +251,7 @@ public static class ProgramEntry
         Console.WriteLine("""
 clothing-repacker analyze --resources <path> --target-resource <name> --out <plan.json>
 clothing-repacker analyze --resource <path> [--resource <path> ...] --generated-root <folder> --target-resource <name> --out <plan.json>
-  [--max-drawables-per-component <128>] [--max-drawables-per-prop <255>]
+  [--max-drawables-per-component <256>] [--max-drawables-per-prop <256>]
   [--optimize-ymt-usage]
 clothing-repacker build --plan <plan.json> --out <folder>
   [--include-ymt-xml <true|false>] [--include-debug-client <true|false>]
