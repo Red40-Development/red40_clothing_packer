@@ -106,6 +106,87 @@ public class MergeTests
 
         Assert.Equal(Enumerable.Range(0, 256), drawableMappings.Select(mapping => mapping.NewDrawableIndex));
         Assert.Equal(Enumerable.Range(0, 256), propMappings.Select(mapping => mapping.NewPropIndex));
+        Assert.Equal("0", builder.BuildXml().Root!.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MergedAggregatePropCountWrapsWithoutDroppingProps(bool optimizeYmtUsage)
+    {
+        var planner = new MergePlanner();
+        var settings = new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 256,
+            MaxDrawablesPerProp = 256,
+            OptimizeYmtUsage = optimizeYmtUsage,
+        };
+        var first = CreateSourceYmt(
+            "creativyx_essentialf",
+            new Dictionary<int, int>(),
+            new Dictionary<int, int>
+            {
+                [0] = 62,
+                [1] = 62,
+                [2] = 84,
+                [6] = 16,
+                [7] = 8,
+            });
+        var second = CreateSourceYmt(
+            "mp_f_zdwcpv2",
+            new Dictionary<int, int>(),
+            new Dictionary<int, int>
+            {
+                [0] = 36,
+                [1] = 4,
+            });
+
+        var outputs = planner.Plan([first, second], settings, [], []);
+
+        var output = Assert.Single(outputs);
+        Assert.Equal(98, output.PropCounts[0]);
+        Assert.Equal(66, output.PropCounts[1]);
+        Assert.Equal(84, output.PropCounts[2]);
+        Assert.Equal(16, output.PropCounts[6]);
+        Assert.Equal(8, output.PropCounts[7]);
+
+        var xml = BuildOutputXml(output);
+        Assert.Equal(272, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
+        Assert.Equal("16", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlannerAllows256PropsPerAnchorInSameCollection(bool optimizeYmtUsage)
+    {
+        var planner = new MergePlanner();
+        var settings = new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = 256,
+            MaxDrawablesPerProp = 256,
+            OptimizeYmtUsage = optimizeYmtUsage,
+        };
+        var source = CreateSourceYmt(
+            "five-full-prop-anchors",
+            new Dictionary<int, int>(),
+            new Dictionary<int, int>
+            {
+                [0] = 256,
+                [1] = 256,
+                [2] = 256,
+                [6] = 256,
+                [7] = 256,
+            });
+
+        var outputs = planner.Plan([source], settings, [], []);
+
+        var output = Assert.Single(outputs);
+        Assert.All(output.PropCounts.Values, count => Assert.Equal(256, count));
+
+        var xml = BuildOutputXml(output);
+        Assert.Equal(1280, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
+        Assert.Equal("0", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
     }
 
     [Fact]
@@ -190,5 +271,20 @@ public class MergeTests
             CreatureComponentRepairHints: Array.Empty<CreatureComponentRepairHint>(),
             CreaturePropRepairHints: Array.Empty<CreaturePropRepairHint>(),
             Messages: Array.Empty<ValidationMessage>());
+    }
+
+    private static XDocument BuildOutputXml(OutputCollectionCapacity output)
+    {
+        var builder = new OutputCollectionBuilder(
+            output.CollectionName,
+            output.FullCollectionName,
+            output.PedBaseName,
+            output.Gender);
+        foreach (var contribution in output.Contributions)
+        {
+            builder.AddProps(contribution.Source, contribution.PropRanges);
+        }
+
+        return builder.BuildXml();
     }
 }

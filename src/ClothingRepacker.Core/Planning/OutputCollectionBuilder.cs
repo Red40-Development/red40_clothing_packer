@@ -173,7 +173,7 @@ public sealed class OutputCollectionBuilder
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo"),
                     _componentInfos.OrderBy(item => item.Key).SelectMany(item => item.Value)),
                 new XElement("propInfo",
-                    new XElement("numAvailProps", new XAttribute("value", propItems.Count)),
+                    new XElement("numAvailProps", new XAttribute("value", propItems.Count % 256)),
                     new XElement("aPropMetaData", new XAttribute("itemType", "CPedPropMetaData"), propItems),
                     new XElement("aAnchors", new XAttribute("itemType", "CAnchorProps"), anchorItems)),
                 new XElement("dlcName", $"hash_{JenkHash.Hash(CollectionName):X8}")));
