@@ -253,7 +253,11 @@ public class MergeTests
             .Select(pair => new PropBlock(
                 pair.Key,
                 Enumerable.Range(0, pair.Value).Select(index =>
-                    new XElement("Item", new XElement("propId", new XAttribute("value", index)))).ToList()))
+                    new XElement("Item",
+                        new XElement("texData", new XAttribute("itemType", "CPedPropTexData"),
+                            new XElement("Item", new XElement("texId", new XAttribute("value", 0)))),
+                        new XElement("anchorId", new XAttribute("value", pair.Key)),
+                        new XElement("propId", new XAttribute("value", index)))).ToList()))
             .ToList();
 
         return new SourceYmt(

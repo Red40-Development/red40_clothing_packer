@@ -153,7 +153,7 @@ public sealed class OutputCollectionBuilder
         var propItems = _props.OrderBy(item => item.Key).SelectMany(item => item.Value).ToList();
         var anchorItems = _props.OrderBy(item => item.Key).Select(item =>
         {
-            var counts = item.Value.Select(prop => Items(prop.Element("aTexData")).Count).ToArray();
+            var counts = item.Value.Select(prop => Items(prop.Element("texData")).Count).ToArray();
             return new XElement("Item",
                 new XElement("props", string.Join(" ", counts)),
                 new XElement("anchor", ClothingConstants.AnchorNames.GetValueOrDefault(item.Key, $"ANCHOR_{item.Key}")));

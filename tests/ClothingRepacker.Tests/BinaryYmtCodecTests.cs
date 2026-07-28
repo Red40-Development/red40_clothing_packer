@@ -1,5 +1,7 @@
 using System.Xml.Linq;
 using ClothingRepacker.CodeWalker;
+using ClothingRepacker.Core.Models;
+using ClothingRepacker.Core.Planning;
 using CodeWalker.GameFiles;
 
 namespace ClothingRepacker.Tests;
@@ -56,6 +58,38 @@ public class BinaryYmtCodecTests
     }
 
     [Fact]
+    public async Task RoundTripsGeneratedPropsWithTextureCountsAndAllSupportedAnchors()
+    {
+        var source = CreatePropSource();
+        var builder = new OutputCollectionBuilder(
+            "merged_f_001",
+            "mp_f_freemode_01_merged_f_001",
+            "mp_f_freemode_01",
+            PedGender.Female);
+        builder.AddProps(source);
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"binary-prop-roundtrip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var outputPath = Path.Combine(tempDir, "mp_f_freemode_01_merged_f_001.ymt");
+
+        await _codec.EncodeFromXmlAsync(builder.BuildXml(), outputPath);
+        var roundTrippedXml = await _codec.DecodeToXmlAsync(outputPath);
+        var propInfo = roundTrippedXml.Root!.Element("propInfo")!;
+
+        Assert.Equal("5", propInfo.Element("numAvailProps")!.Attribute("value")!.Value);
+        Assert.Equal(
+            [0, 1, 2, 6, 7],
+            propInfo.Element("aPropMetaData")!.Elements("Item")
+                .Select(item => int.Parse(item.Element("anchorId")!.Attribute("value")!.Value)));
+        Assert.Equal(
+            ["ANCHOR_HEAD", "ANCHOR_EYES", "ANCHOR_EARS", "ANCHOR_LEFT_WRIST", "ANCHOR_RIGHT_WRIST"],
+            propInfo.Element("aAnchors")!.Elements("Item").Select(item => item.Element("anchor")!.Value.Trim()));
+        Assert.Equal(
+            ["1", "2", "3", "4", "5"],
+            propInfo.Element("aAnchors")!.Elements("Item").Select(item => item.Element("props")!.Value.Trim()));
+    }
+
+    [Fact]
     public void ConvertsUnsignedDecimalSignedVariationIndexBeforeMetaEncoding()
     {
         var xml = new XDocument(
@@ -107,6 +141,56 @@ public class BinaryYmtCodecTests
 
     private static string Fixture(string fileName)
         => TestFixturePaths.Ymt(fileName);
+
+    private static SourceYmt CreatePropSource()
+    {
+        var textureCounts = new Dictionary<int, int>
+        {
+            [0] = 1,
+            [1] = 2,
+            [2] = 3,
+            [6] = 4,
+            [7] = 5,
+        };
+        var props = textureCounts.Select(pair =>
+            new PropBlock(pair.Key, [CreatePropItem(pair.Key, pair.Value)])).ToList();
+
+        return new SourceYmt(
+            YmtPath: "/tmp/mp_f_freemode_01_prop_source.ymt.xml",
+            ResourceName: "test_resource",
+            ResourceRoot: "/tmp/test_resource",
+            PedBaseName: "mp_f_freemode_01",
+            Gender: PedGender.Female,
+            CollectionName: "prop_source",
+            FullCollectionName: "mp_f_freemode_01_prop_source",
+            DlcName: "hash_test",
+            Xml: new XDocument(new XElement("CPedVariationInfo")),
+            Components: Array.Empty<ComponentBlock>(),
+            Props: props,
+            CreatureComponentRepairHints: Array.Empty<CreatureComponentRepairHint>(),
+            CreaturePropRepairHints: Array.Empty<CreaturePropRepairHint>(),
+            Messages: Array.Empty<ValidationMessage>());
+    }
+
+    private static XElement CreatePropItem(int anchorId, int textureCount)
+        => new("Item",
+            new XElement("audioId", "none"),
+            new XElement("expressionMods", "0 0 0 0 0"),
+            new XElement("texData", new XAttribute("itemType", "CPedPropTexData"),
+                Enumerable.Range(0, textureCount).Select(textureIndex =>
+                    new XElement("Item",
+                        new XElement("inclusions", 0),
+                        new XElement("exclusions", 0),
+                        new XElement("texId", new XAttribute("value", textureIndex)),
+                        new XElement("inclusionId", new XAttribute("value", 0)),
+                        new XElement("exclusionId", new XAttribute("value", 0)),
+                        new XElement("distribution", new XAttribute("value", 255))))),
+            new XElement("renderFlags"),
+            new XElement("propFlags", new XAttribute("value", 0)),
+            new XElement("flags", new XAttribute("value", 0)),
+            new XElement("anchorId", new XAttribute("value", anchorId)),
+            new XElement("propId", new XAttribute("value", 0)),
+            new XElement("stickyness", new XAttribute("value", 0)));
 
     private static bool IsRbfFile(string path)
     {

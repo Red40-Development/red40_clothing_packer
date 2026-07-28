@@ -59,7 +59,7 @@ public static class ClothingConstants
             [0] = "ANCHOR_HEAD",
             [1] = "ANCHOR_EYES",
             [2] = "ANCHOR_EARS",
-            [6] = "ANCHOR_LWRIST",
-            [7] = "ANCHOR_RWRIST",
+            [6] = "ANCHOR_LEFT_WRIST",
+            [7] = "ANCHOR_RIGHT_WRIST",
         });
 }

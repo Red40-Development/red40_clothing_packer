@@ -2312,7 +2312,7 @@ public sealed class RepackerService
 
         foreach (var prop in propMetadata)
         {
-            var textureCount = Math.Max(1, XmlHelpers.Items(prop.Item.Element("aTexData")).Count);
+            var textureCount = Math.Max(1, XmlHelpers.Items(prop.Item.Element("texData")).Count);
             for (var textureIndex = 0; textureIndex < textureCount; textureIndex++)
             {
                 var prefix = ClothingConstants.PropPrefixes.GetValueOrDefault(prop.AnchorId, $"prop_{prop.AnchorId}");
