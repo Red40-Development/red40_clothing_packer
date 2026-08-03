@@ -2520,17 +2520,20 @@ public sealed class RepackerService
 
     private static string BuildValidationLua(MergePlan plan)
     {
-        var collectionList = string.Join("," + Environment.NewLine, plan.TargetCollections.OrderBy(target => target.CollectionName).Select(target => $"        \"{target.CollectionName}\""));
-        var expected = string.Join(Environment.NewLine, plan.TargetCollections.Select(target =>
+        var orderedTargets = plan.TargetCollections.OrderBy(target => target.CollectionName).ToList();
+        var collectionList = string.Join("," + Environment.NewLine, orderedTargets.Select(target => $"        '{target.CollectionName}'"));
+        var expected = string.Join(Environment.NewLine, orderedTargets.Select(target =>
         {
             var componentEntries = string.Join(", ", target.ComponentCounts.OrderBy(item => item.Key).Select(item => $"[{item.Key}] = {item.Value}"));
             var propEntries = string.Join(", ", target.PropCounts.OrderBy(item => item.Key).Select(item => $"[{item.Key}] = {item.Value}"));
-            return $"    {target.CollectionName} = {{ components = {{ {componentEntries} }}, props = {{ {propEntries} }} }},";
+            return $"    ['{target.CollectionName}'] = {{ components = {{ {componentEntries} }}, props = {{ {propEntries} }} }},";
         }));
 
         return $$"""
-RegisterCommand("clothing_repacker_validate", function()
+RegisterCommand('clothing_repacker_validate', function()
     local ped = PlayerPedId()
+    local checked = 0
+    local failures = 0
 
     local collections = {
 {{collectionList}}
@@ -2540,23 +2543,43 @@ RegisterCommand("clothing_repacker_validate", function()
 {{expected}}
     }
 
+    local function verifyCount(kind, index, actual, expectedCount)
+        actual = actual or 0
+        expectedCount = expectedCount or 0
+        checked = checked + 1
+
+        if actual == expectedCount then
+            if actual > 0 then
+                print(('  PASS %s %d -> %d'):format(kind, index, actual))
+            end
+            return
+        end
+
+        failures = failures + 1
+        print(('  FAIL %s %d -> expected %d, got %d'):format(kind, index, expectedCount, actual))
+    end
+
     for _, collection in ipairs(collections) do
-        print(("Checking collection: %s"):format(collection))
+        local collectionExpected = expected[collection]
+        print(('Checking collection: %s'):format(collection))
 
         for comp = 0, 11 do
             local count = GetNumberOfPedCollectionDrawableVariations(ped, comp, collection)
-            if count and count > 0 then
-                print(("  component %d -> %d drawables"):format(comp, count))
-            end
+            verifyCount('component', comp, count, collectionExpected.components[comp])
         end
 
         for anchor = 0, 12 do
             local count = GetNumberOfPedCollectionPropDrawableVariations(ped, anchor, collection)
-            if count and count > 0 then
-                print(("  prop anchor %d -> %d props"):format(anchor, count))
-            end
+            verifyCount('prop anchor', anchor, count, collectionExpected.props[anchor])
         end
     end
+
+    if failures == 0 then
+        print(('Clothing collection validation PASSED: %d checks matched expected counts.'):format(checked))
+        return
+    end
+
+    print(('Clothing collection validation FAILED: %d of %d checks did not match expected counts.'):format(failures, checked))
 end, false)
 """;
     }

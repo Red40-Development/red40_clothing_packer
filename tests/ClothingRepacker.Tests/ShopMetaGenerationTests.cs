@@ -119,6 +119,34 @@ public class ShopMetaGenerationTests
     }
 
     [Fact]
+    public async Task DebugClientValidatesNativeCountsAgainstExpectedCounts()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"debug-client-validation-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var resources = Path.Combine(root, "resources");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeDebugClient = true,
+        });
+
+        var validationPath = Path.Combine(outputRoot, "zz_merged_clothing_meta", "client", "validate_collections.lua");
+        var validationLua = await File.ReadAllTextAsync(validationPath);
+
+        Assert.Contains("local collectionExpected = expected[collection]", validationLua);
+        Assert.Contains("collectionExpected.components[comp]", validationLua);
+        Assert.Contains("collectionExpected.props[anchor]", validationLua);
+        Assert.Contains("if actual == expectedCount then", validationLua);
+        Assert.Contains("validation PASSED", validationLua);
+        Assert.Contains("validation FAILED", validationLua);
+    }
+
+    [Fact]
     public async Task BuildCanSkipPreviewXmlAndDebugClientArtifacts()
     {
         var root = Path.Combine(Path.GetTempPath(), $"shop-meta-build-options-test-{Guid.NewGuid():N}");
