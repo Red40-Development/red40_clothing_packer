@@ -34,6 +34,11 @@ public sealed class OutputCollectionCapacity
             }
         }
 
+        if (PropCounts.Values.Sum() + contribution.PropRanges.Values.Sum(range => range.Count) > maxDrawablesPerProp)
+        {
+            return false;
+        }
+
         return true;
     }
 

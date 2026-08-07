@@ -112,7 +112,7 @@ public class MergeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void MergedAggregatePropCountWrapsWithoutDroppingProps(bool optimizeYmtUsage)
+    public void PlannerSplitsAggregatePropsAcrossCollectionsWithoutDroppingProps(bool optimizeYmtUsage)
     {
         var planner = new MergePlanner();
         var settings = new MergePlanSettings
@@ -143,22 +143,28 @@ public class MergeTests
 
         var outputs = planner.Plan([first, second], settings, [], []);
 
-        var output = Assert.Single(outputs);
-        Assert.Equal(98, output.PropCounts[0]);
-        Assert.Equal(66, output.PropCounts[1]);
-        Assert.Equal(84, output.PropCounts[2]);
-        Assert.Equal(16, output.PropCounts[6]);
-        Assert.Equal(8, output.PropCounts[7]);
+        Assert.Equal(2, outputs.Count);
+        Assert.All(outputs, output => Assert.InRange(output.PropCounts.Values.Sum(), 1, settings.MaxDrawablesPerProp));
+        Assert.Equal(98, outputs.Sum(output => output.PropCounts.GetValueOrDefault(0)));
+        Assert.Equal(66, outputs.Sum(output => output.PropCounts.GetValueOrDefault(1)));
+        Assert.Equal(84, outputs.Sum(output => output.PropCounts.GetValueOrDefault(2)));
+        Assert.Equal(16, outputs.Sum(output => output.PropCounts.GetValueOrDefault(6)));
+        Assert.Equal(8, outputs.Sum(output => output.PropCounts.GetValueOrDefault(7)));
 
-        var xml = BuildOutputXml(output);
-        Assert.Equal(272, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
-        Assert.Equal("16", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+        var xmls = outputs.Select(BuildOutputXml).ToList();
+        Assert.Equal(272, xmls.Sum(xml => xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count()));
+        Assert.All(xmls, xml =>
+        {
+            var propInfo = xml.Root!.Element("propInfo")!;
+            var count = propInfo.Element("aPropMetaData")!.Elements("Item").Count();
+            Assert.Equal((count % 256).ToString(), propInfo.Element("numAvailProps")!.Attribute("value")!.Value);
+        });
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void PlannerAllows256PropsPerAnchorInSameCollection(bool optimizeYmtUsage)
+    public void PlannerLimitsAggregatePropsEvenWhenEveryAnchorFitsIndividually(bool optimizeYmtUsage)
     {
         var planner = new MergePlanner();
         var settings = new MergePlanSettings
@@ -181,12 +187,13 @@ public class MergeTests
 
         var outputs = planner.Plan([source], settings, [], []);
 
-        var output = Assert.Single(outputs);
-        Assert.All(output.PropCounts.Values, count => Assert.Equal(256, count));
-
-        var xml = BuildOutputXml(output);
-        Assert.Equal(1280, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
-        Assert.Equal("0", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+        Assert.Equal(5, outputs.Count);
+        Assert.All(outputs, output => Assert.Equal(256, output.PropCounts.Values.Sum()));
+        Assert.All(outputs.Select(BuildOutputXml), xml =>
+        {
+            Assert.Equal(256, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
+            Assert.Equal("0", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+        });
     }
 
     [Fact]

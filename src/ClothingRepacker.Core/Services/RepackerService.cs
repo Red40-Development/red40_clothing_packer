@@ -359,6 +359,12 @@ public sealed class RepackerService
     public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions? options = null, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         options ??= new BuildOptions();
+        var validationErrors = _planValidator.Validate(plan);
+        if (validationErrors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(Environment.NewLine, validationErrors));
+        }
+
         var fullOutputRoot = Path.GetFullPath(outputRoot);
         ValidateGeneratedResourcesRoot(GetKnownResourceRoots(plan), fullOutputRoot, GeneratedResourcesRootUsage.GeneratedOnly);
 

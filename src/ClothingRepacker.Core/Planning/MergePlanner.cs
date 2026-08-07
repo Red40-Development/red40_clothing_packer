@@ -76,7 +76,8 @@ public sealed class MergePlanner
             return sources.Count == 0 ? [] : [BuildEmptyOutput(sources, settings)];
         }
 
-        var packedLanes = laneContributions
+        var packedComponentLanes = laneContributions
+            .Where(contribution => contribution.Kind == LaneKind.Component)
             .GroupBy(contribution => new LaneKey(contribution.Kind, contribution.Range.SlotId))
             .OrderBy(group => group.Key.Kind)
             .ThenBy(group => group.Key.SlotId)
@@ -84,13 +85,18 @@ public sealed class MergePlanner
                 group.Key,
                 PackLane(group, CapacityFor(group.Key, settings))))
             .ToList();
-        var outputCount = packedLanes.Max(lane => lane.Bins.Count);
+        var packedProps = PackLane(
+            laneContributions.Where(contribution => contribution.Kind == LaneKind.Prop),
+            settings.MaxDrawablesPerProp);
+        var outputCount = Math.Max(
+            packedComponentLanes.Select(lane => lane.Bins.Count).DefaultIfEmpty(0).Max(),
+            packedProps.Count);
         var outputs = Enumerable
             .Range(1, outputCount)
             .Select(index => CreateOutput(sources[0], settings, index))
             .ToList();
 
-        foreach (var lane in packedLanes)
+        foreach (var lane in packedComponentLanes)
         {
             for (var binIndex = 0; binIndex < lane.Bins.Count; binIndex++)
             {
@@ -98,6 +104,14 @@ public sealed class MergePlanner
                 {
                     outputs[binIndex].Add(ToSourceContribution(contribution));
                 }
+            }
+        }
+
+        for (var binIndex = 0; binIndex < packedProps.Count; binIndex++)
+        {
+            foreach (var contribution in packedProps[binIndex].Contributions)
+            {
+                outputs[binIndex].Add(ToSourceContribution(contribution));
             }
         }
 
@@ -182,6 +196,7 @@ public sealed class MergePlanner
         var bins = new List<LaneBin>();
         foreach (var contribution in contributions
                      .OrderByDescending(contribution => contribution.Range.Count)
+                     .ThenBy(contribution => contribution.Range.SlotId)
                      .ThenBy(contribution => contribution.Source.YmtPath, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(contribution => contribution.Range.StartIndex))
         {
@@ -218,11 +233,8 @@ public sealed class MergePlanner
             .Select(component => PageCount(component.Drawables.Count, maxDrawablesPerComponent))
             .DefaultIfEmpty(1)
             .Max();
-        var propPages = source.Props
-            .Select(prop => PageCount(prop.Props.Count, maxDrawablesPerProp))
-            .DefaultIfEmpty(1)
-            .Max();
-        var pageCount = Math.Max(componentPages, propPages);
+        var propPages = SplitPropRanges(source, maxDrawablesPerProp);
+        var pageCount = Math.Max(componentPages, Math.Max(1, propPages.Count));
         var result = new List<SourceYmtContribution>();
 
         for (var page = 0; page < pageCount; page++)
@@ -231,10 +243,9 @@ public sealed class MergePlanner
                 .Select(component => BuildRange(source.YmtPath, component.ComponentId, component.Drawables.Count, page, maxDrawablesPerComponent))
                 .Where(range => range.Count > 0)
                 .ToDictionary(range => range.SlotId, range => range);
-            var propRanges = source.Props
-                .Select(prop => BuildRange(source.YmtPath, prop.AnchorId, prop.Props.Count, page, maxDrawablesPerProp))
-                .Where(range => range.Count > 0)
-                .ToDictionary(range => range.SlotId, range => range);
+            var propRanges = page < propPages.Count
+                ? propPages[page]
+                : new Dictionary<int, SourceIndexRange>();
 
             if (componentRanges.Count > 0 || propRanges.Count > 0 || pageCount == 1)
             {
@@ -243,6 +254,34 @@ public sealed class MergePlanner
         }
 
         return result;
+    }
+
+    private static IReadOnlyList<IReadOnlyDictionary<int, SourceIndexRange>> SplitPropRanges(SourceYmt source, int capacity)
+    {
+        var pages = new List<IReadOnlyDictionary<int, SourceIndexRange>>();
+        Dictionary<int, SourceIndexRange>? currentPage = null;
+        var used = 0;
+
+        foreach (var prop in source.Props.OrderBy(prop => prop.AnchorId))
+        {
+            var start = 0;
+            while (start < prop.Props.Count)
+            {
+                if (currentPage is null || used == capacity)
+                {
+                    currentPage = [];
+                    pages.Add(currentPage);
+                    used = 0;
+                }
+
+                var count = Math.Min(capacity - used, prop.Props.Count - start);
+                currentPage[prop.AnchorId] = new SourceIndexRange(source.YmtPath, prop.AnchorId, start, count);
+                start += count;
+                used += count;
+            }
+        }
+
+        return pages;
     }
 
     private static int PageCount(int count, int pageSize)
