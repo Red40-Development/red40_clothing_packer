@@ -15,7 +15,7 @@ It supports:
 Like this tool and want to support further development? Checkout our store [Red40 Development](https://red40.dev/scripts)
 
 # NEW COMPONENT LIMIT PER YMT
-As of [this commit](https://github.com/citizenfx/fivem/commit/a6f68afb776e6df44a56816efecfef46fdceb36f) the limit per component for YMTs has been increased to 255. You can increase it in the advanced section of the gui or via the cli option documented below. I won't change this default for a little while in case the change is reverted.
+As of [this commit](https://github.com/citizenfx/fivem/commit/a6f68afb776e6df44a56816efecfef46fdceb36f), FiveM syncs component drawable indices with 8 bits. Runtime testing shows that streamed collection index 255 still does not load, so generated YMTs are capped at 255 drawables per component, using local indices 0-254. This change is component-only: `numAvailProps` is still an unsigned byte count, so generated YMTs are also capped at 255 aggregate props across all prop anchors.
 
 ## New GUI now available
 
@@ -67,11 +67,11 @@ If you are running from source, use `dotnet run --project src/ClothingRepacker.C
 
 ```bash
 ClothingRepacker.Cli analyze --resources <path> --target-resource <name> --out <plan.json>
-  [--max-drawables-per-component <256>] [--max-drawables-per-prop <256>]
+  [--max-drawables-per-component <1-255>] [--max-drawables-per-prop <1-255>]
   [--optimize-ymt-usage]
 ClothingRepacker.Cli analyze --resource <path_to_resource> [--resource <path_to_resource> ...]
   --generated-root <folder> --target-resource <name> --out <plan.json>
-  [--max-drawables-per-component <256>] [--max-drawables-per-prop <256>]
+  [--max-drawables-per-component <1-255>] [--max-drawables-per-prop <1-255>]
   [--optimize-ymt-usage]
 
 ClothingRepacker.Cli build --plan <plan.json> --out <folder>
@@ -125,7 +125,7 @@ ClothingRepacker.Cli analyze \
 
 When using one or more `--resource` options, each value must be an actual resource folder. `--generated-root` controls where `apply` will copy the generated merged resource.
 
-By default, analyze keeps each source YMT's component and prop lanes together unless a source exceeds the configured drawable limits. Add `--optimize-ymt-usage` to let the planner split source lanes across generated YMTs when that can produce fewer target collections. This can reduce YMT usage, but the resulting plan may mix pieces of the same source pack across multiple generated collections.
+By default, analyze keeps each source YMT's component and prop lanes together unless a source exceeds the configured drawable limits. The prop limit applies to the aggregate prop metadata in a generated YMT, across all prop anchors. Add `--optimize-ymt-usage` to let the planner split source lanes across generated YMTs when that can produce fewer target collections. This can reduce YMT usage, but the resulting plan may mix pieces of the same source pack across multiple generated collections.
 
 Validate the generated plan:
 

@@ -2,6 +2,7 @@ using ClothingRepacker.Core.Hashing;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Planning;
 using ClothingRepacker.Core.Xml;
+using ClothingRepacker.Core;
 using System.Xml.Linq;
 
 namespace ClothingRepacker.Tests;
@@ -71,24 +72,23 @@ public class MergeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void ComponentAndPropLimitsUseAllIndicesThrough255(bool optimizeYmtUsage)
+    public void ComponentLimitUsesIndicesThrough254(bool optimizeYmtUsage)
     {
         var planner = new MergePlanner();
         var settings = new MergePlanSettings
         {
-            MaxDrawablesPerComponent = 256,
-            MaxDrawablesPerProp = 256,
+            MaxDrawablesPerComponent = 255,
+            MaxDrawablesPerProp = 255,
             OptimizeYmtUsage = optimizeYmtUsage,
         };
-        var first = CreateSourceYmt("component-limit-a", new Dictionary<int, int> { [0] = 128 }, new Dictionary<int, int> { [0] = 128 });
-        var second = CreateSourceYmt("component-limit-b", new Dictionary<int, int> { [0] = 128 }, new Dictionary<int, int> { [0] = 128 });
+        var first = CreateSourceYmt("component-limit-a", new Dictionary<int, int> { [0] = 127 });
+        var second = CreateSourceYmt("component-limit-b", new Dictionary<int, int> { [0] = 128 });
 
         var outputs = planner.Plan([first, second], settings, [], []);
 
         var output = Assert.Single(outputs);
-        Assert.Equal(256, output.ComponentCounts[0]);
-        Assert.Equal(256, output.PropCounts[0]);
-        Assert.Equal(256, output.Contributions
+        Assert.Equal(255, output.ComponentCounts[0]);
+        Assert.Equal(255, output.Contributions
             .Where(contribution => contribution.ComponentRanges.ContainsKey(0))
             .Sum(contribution => contribution.ComponentRanges[0].Count));
 
@@ -100,13 +100,48 @@ public class MergeTests
         var drawableMappings = output.Contributions
             .SelectMany(contribution => builder.AddComponents(contribution.Source, contribution.ComponentRanges))
             .ToList();
-        var propMappings = output.Contributions
-            .SelectMany(contribution => builder.AddProps(contribution.Source, contribution.PropRanges))
-            .ToList();
 
-        Assert.Equal(Enumerable.Range(0, 256), drawableMappings.Select(mapping => mapping.NewDrawableIndex));
-        Assert.Equal(Enumerable.Range(0, 256), propMappings.Select(mapping => mapping.NewPropIndex));
-        Assert.Equal("0", builder.BuildXml().Root!.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+        Assert.Equal(Enumerable.Range(0, 255), drawableMappings.Select(mapping => mapping.NewDrawableIndex));
+        Assert.Equal(255, builder.BuildXml().Root!.Element("aComponentData3")!.Element("Item")!.Element("aDrawblData3")!.Elements("Item").Count());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PlannerSplitsTwo128DrawableSourcesBeforeIndex255(bool optimizeYmtUsage)
+    {
+        var planner = new MergePlanner();
+        var settings = new MergePlanSettings
+        {
+            MaxDrawablesPerComponent = ClothingConstants.MaximumDrawablesPerComponent,
+            MaxDrawablesPerProp = ClothingConstants.MaximumDrawablesPerProp,
+            OptimizeYmtUsage = optimizeYmtUsage,
+        };
+        var first = CreateSourceYmt("component-limit-a", new Dictionary<int, int> { [0] = 128 });
+        var second = CreateSourceYmt("component-limit-b", new Dictionary<int, int> { [0] = 128 });
+
+        var outputs = planner.Plan([first, second], settings, [], []);
+
+        Assert.Equal(2, outputs.Count);
+        Assert.Equal(256, outputs.Sum(output => output.ComponentCounts.GetValueOrDefault(0)));
+        Assert.All(outputs, output => Assert.InRange(
+            output.ComponentCounts.GetValueOrDefault(0),
+            1,
+            ClothingConstants.MaximumDrawablesPerComponent));
+
+        foreach (var output in outputs)
+        {
+            var builder = new OutputCollectionBuilder(
+                output.CollectionName,
+                output.FullCollectionName,
+                output.PedBaseName,
+                output.Gender);
+            var mappings = output.Contributions
+                .SelectMany(contribution => builder.AddComponents(contribution.Source, contribution.ComponentRanges))
+                .ToList();
+
+            Assert.All(mappings, mapping => Assert.InRange(mapping.NewDrawableIndex, 0, 254));
+        }
     }
 
     [Theory]
@@ -117,8 +152,8 @@ public class MergeTests
         var planner = new MergePlanner();
         var settings = new MergePlanSettings
         {
-            MaxDrawablesPerComponent = 256,
-            MaxDrawablesPerProp = 256,
+            MaxDrawablesPerComponent = 255,
+            MaxDrawablesPerProp = 255,
             OptimizeYmtUsage = optimizeYmtUsage,
         };
         var first = CreateSourceYmt(
@@ -144,7 +179,7 @@ public class MergeTests
         var outputs = planner.Plan([first, second], settings, [], []);
 
         Assert.Equal(2, outputs.Count);
-        Assert.All(outputs, output => Assert.InRange(output.PropCounts.Values.Sum(), 1, settings.MaxDrawablesPerProp));
+        Assert.All(outputs, output => Assert.InRange(output.PropCounts.Values.Sum(), 1, ClothingConstants.MaximumDrawablesPerProp));
         Assert.Equal(98, outputs.Sum(output => output.PropCounts.GetValueOrDefault(0)));
         Assert.Equal(66, outputs.Sum(output => output.PropCounts.GetValueOrDefault(1)));
         Assert.Equal(84, outputs.Sum(output => output.PropCounts.GetValueOrDefault(2)));
@@ -157,20 +192,21 @@ public class MergeTests
         {
             var propInfo = xml.Root!.Element("propInfo")!;
             var count = propInfo.Element("aPropMetaData")!.Elements("Item").Count();
-            Assert.Equal((count % 256).ToString(), propInfo.Element("numAvailProps")!.Attribute("value")!.Value);
+            Assert.Equal(count.ToString(), propInfo.Element("numAvailProps")!.Attribute("value")!.Value);
+            Assert.NotEqual(0, count);
         });
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void PlannerLimitsAggregatePropsEvenWhenEveryAnchorFitsIndividually(bool optimizeYmtUsage)
+    public void PlannerKeepsAggregatePropCountRepresentable(bool optimizeYmtUsage)
     {
         var planner = new MergePlanner();
         var settings = new MergePlanSettings
         {
-            MaxDrawablesPerComponent = 256,
-            MaxDrawablesPerProp = 256,
+            MaxDrawablesPerComponent = 255,
+            MaxDrawablesPerProp = 255,
             OptimizeYmtUsage = optimizeYmtUsage,
         };
         var source = CreateSourceYmt(
@@ -187,13 +223,54 @@ public class MergeTests
 
         var outputs = planner.Plan([source], settings, [], []);
 
-        Assert.Equal(5, outputs.Count);
-        Assert.All(outputs, output => Assert.Equal(256, output.PropCounts.Values.Sum()));
+        Assert.Equal(6, outputs.Count);
+        Assert.Equal(1280, outputs.Sum(output => output.PropCounts.Values.Sum()));
+        Assert.All(outputs, output => Assert.InRange(output.PropCounts.Values.Sum(), 1, ClothingConstants.MaximumDrawablesPerProp));
         Assert.All(outputs.Select(BuildOutputXml), xml =>
         {
-            Assert.Equal(256, xml.Root!.Element("propInfo")!.Element("aPropMetaData")!.Elements("Item").Count());
-            Assert.Equal("0", xml.Root.Element("propInfo")!.Element("numAvailProps")!.Attribute("value")!.Value);
+            var propInfo = xml.Root!.Element("propInfo")!;
+            var count = propInfo.Element("aPropMetaData")!.Elements("Item").Count();
+            Assert.Equal(count.ToString(), propInfo.Element("numAvailProps")!.Attribute("value")!.Value);
         });
+    }
+
+    [Fact]
+    public void BuilderRejects256AggregatePropsInsteadOfWritingZeroCount()
+    {
+        var source = CreateSourceYmt(
+            "unsafe-prop-count",
+            new Dictionary<int, int>(),
+            new Dictionary<int, int> { [0] = 256 });
+        var builder = new OutputCollectionBuilder(
+            "merged_m_001",
+            "mp_m_freemode_01_merged_m_001",
+            "mp_m_freemode_01",
+            PedGender.Male);
+        builder.AddProps(source);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.BuildXml());
+
+        Assert.Contains("256 aggregate props", exception.Message);
+        Assert.Contains("maximum is 255", exception.Message);
+    }
+
+    [Fact]
+    public void BuilderRejectsComponentIndex255()
+    {
+        var source = CreateSourceYmt(
+            "unsafe-component-count",
+            new Dictionary<int, int> { [11] = 256 });
+        var builder = new OutputCollectionBuilder(
+            "merged_m_001",
+            "mp_m_freemode_01_merged_m_001",
+            "mp_m_freemode_01",
+            PedGender.Male);
+        builder.AddComponents(source);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.BuildXml());
+
+        Assert.Contains("component 11 contains 256 drawables", exception.Message);
+        Assert.Contains("maximum is 255", exception.Message);
     }
 
     [Fact]

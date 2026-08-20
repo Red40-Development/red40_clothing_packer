@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using ClothingRepacker.CodeWalker;
+using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Planning;
 using CodeWalker.GameFiles;
@@ -90,6 +91,31 @@ public class BinaryYmtCodecTests
     }
 
     [Fact]
+    public async Task RoundTripsMaximumGeneratedComponentDrawables()
+    {
+        var source = CreateComponentSource(ClothingConstants.MaximumDrawablesPerComponent);
+        var builder = new OutputCollectionBuilder(
+            "merged_f_001",
+            "mp_f_freemode_01_merged_f_001",
+            "mp_f_freemode_01",
+            PedGender.Female);
+        var mappings = builder.AddComponents(source);
+        var xml = builder.BuildXml();
+        var tempDir = Path.Combine(Path.GetTempPath(), $"binary-component-limit-roundtrip-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var outputPath = Path.Combine(tempDir, "mp_f_freemode_01_merged_f_001.ymt");
+
+        await _codec.EncodeFromXmlAsync(xml, outputPath);
+        var roundTrippedXml = await _codec.DecodeToXmlAsync(outputPath);
+        var component = roundTrippedXml.Root!.Element("aComponentData3")!.Element("Item")!;
+
+        Assert.Equal(Enumerable.Range(0, ClothingConstants.MaximumDrawablesPerComponent), mappings.Select(mapping => mapping.NewDrawableIndex));
+        Assert.Equal(ClothingConstants.MaximumDrawablesPerComponent, component.Element("aDrawblData3")!.Elements("Item").Count());
+        Assert.Contains(component.Element("aDrawblData3")!.Elements("Item"), item =>
+            item.Element("aTexData")!.Elements("Item").Any());
+    }
+
+    [Fact]
     public void ConvertsUnsignedDecimalSignedVariationIndexBeforeMetaEncoding()
     {
         var xml = new XDocument(
@@ -167,6 +193,37 @@ public class BinaryYmtCodecTests
             Xml: new XDocument(new XElement("CPedVariationInfo")),
             Components: Array.Empty<ComponentBlock>(),
             Props: props,
+            CreatureComponentRepairHints: Array.Empty<CreatureComponentRepairHint>(),
+            CreaturePropRepairHints: Array.Empty<CreaturePropRepairHint>(),
+            Messages: Array.Empty<ValidationMessage>());
+    }
+
+    private static SourceYmt CreateComponentSource(int drawableCount)
+    {
+        var drawables = Enumerable.Range(0, drawableCount)
+            .Select(_ => new XElement("Item",
+                new XElement("propMask", new XAttribute("value", 1)),
+                new XElement("numAlternatives", new XAttribute("value", 0)),
+                new XElement("aTexData", new XAttribute("itemType", "CPVTextureData"),
+                    new XElement("Item",
+                        new XElement("texId", new XAttribute("value", 0)),
+                        new XElement("distribution", new XAttribute("value", 255)))),
+                new XElement("clothData",
+                    new XElement("ownsCloth", new XAttribute("value", "false")))))
+            .ToList();
+
+        return new SourceYmt(
+            YmtPath: "/tmp/mp_f_freemode_01_component_source.ymt.xml",
+            ResourceName: "test_resource",
+            ResourceRoot: "/tmp/test_resource",
+            PedBaseName: "mp_f_freemode_01",
+            Gender: PedGender.Female,
+            CollectionName: "component_source",
+            FullCollectionName: "mp_f_freemode_01_component_source",
+            DlcName: "hash_test",
+            Xml: new XDocument(new XElement("CPedVariationInfo")),
+            Components: [new ComponentBlock(11, drawables, Array.Empty<XElement>())],
+            Props: Array.Empty<PropBlock>(),
             CreatureComponentRepairHints: Array.Empty<CreatureComponentRepairHint>(),
             CreaturePropRepairHints: Array.Empty<CreaturePropRepairHint>(),
             Messages: Array.Empty<ValidationMessage>());

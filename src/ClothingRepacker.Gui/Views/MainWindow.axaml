@@ -121,11 +121,11 @@
                   <CheckBox Content="Overwrite XML previews during export" IsChecked="{Binding OverwriteXml, Mode=TwoWay}" />
                   <StackPanel Grid.Column="0" Spacing="4">
                     <TextBlock Text="Max component drawables" />
-                    <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerComponent, Mode=TwoWay}" />
+                    <NumericUpDown Minimum="1" Maximum="255" Value="{Binding MaxDrawablesPerComponent, Mode=TwoWay}" />
                   </StackPanel>
                   <StackPanel Grid.Column="1" Spacing="4">
                     <TextBlock Text="Max prop drawables" />
-                    <NumericUpDown Minimum="1" Maximum="4096" Value="{Binding MaxDrawablesPerProp, Mode=TwoWay}" />
+                    <NumericUpDown Minimum="1" Maximum="255" Value="{Binding MaxDrawablesPerProp, Mode=TwoWay}" />
                   </StackPanel>
                 </StackPanel>
               </Expander>

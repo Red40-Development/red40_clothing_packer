@@ -83,6 +83,16 @@ public sealed class RepackerService
             throw new InvalidOperationException("Drawable limits must be greater than zero.");
         }
 
+        if (settings.MaxDrawablesPerComponent > ClothingConstants.MaximumDrawablesPerComponent)
+        {
+            throw new InvalidOperationException($"Component drawable limit cannot exceed {ClothingConstants.MaximumDrawablesPerComponent} (indices 0-{ClothingConstants.MaximumDrawablesPerComponent - 1}).");
+        }
+
+        if (settings.MaxDrawablesPerProp > ClothingConstants.MaximumDrawablesPerProp)
+        {
+            throw new InvalidOperationException($"Prop drawable limit cannot exceed {ClothingConstants.MaximumDrawablesPerProp}; the YMT numAvailProps field is an unsigned byte and 256 wraps to zero.");
+        }
+
         ValidateGeneratedResourcesRoot(
             scanItems.Select(item => item.ResourceRoot),
             generatedResourcesRoot,

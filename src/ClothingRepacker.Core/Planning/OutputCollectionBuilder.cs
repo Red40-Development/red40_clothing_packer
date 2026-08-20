@@ -139,6 +139,8 @@ public sealed class OutputCollectionBuilder
 
     public XDocument BuildXml()
     {
+        ValidateCapacity();
+
         var availComp = Enumerable.Repeat(ClothingConstants.MissingComponent, ClothingConstants.ComponentSlotCount).ToArray();
         var componentItems = new List<XElement>();
         foreach (var component in _componentDrawables.OrderBy(item => item.Key))
@@ -173,7 +175,7 @@ public sealed class OutputCollectionBuilder
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo"),
                     _componentInfos.OrderBy(item => item.Key).SelectMany(item => item.Value)),
                 new XElement("propInfo",
-                    new XElement("numAvailProps", new XAttribute("value", propItems.Count % 256)),
+                    new XElement("numAvailProps", new XAttribute("value", propItems.Count)),
                     new XElement("aPropMetaData", new XAttribute("itemType", "CPedPropMetaData"), propItems),
                     new XElement("aAnchors", new XAttribute("itemType", "CAnchorProps"), anchorItems)),
                 new XElement("dlcName", $"hash_{JenkHash.Hash(CollectionName):X8}")));
@@ -184,6 +186,23 @@ public sealed class OutputCollectionBuilder
 
     public Dictionary<int, int> GetPropCounts()
         => _props.ToDictionary(item => item.Key, item => item.Value.Count);
+
+    private void ValidateCapacity()
+    {
+        foreach (var component in _componentDrawables)
+        {
+            if (component.Value.Count > ClothingConstants.MaximumDrawablesPerComponent)
+            {
+                throw new InvalidOperationException($"Target collection {FullCollectionName} component {component.Key} contains {component.Value.Count} drawables; the maximum is {ClothingConstants.MaximumDrawablesPerComponent}.");
+            }
+        }
+
+        var propCount = _props.Values.Sum(props => props.Count);
+        if (propCount > ClothingConstants.MaximumDrawablesPerProp)
+        {
+            throw new InvalidOperationException($"Target collection {FullCollectionName} contains {propCount} aggregate props; the maximum is {ClothingConstants.MaximumDrawablesPerProp} because numAvailProps is an unsigned byte.");
+        }
+    }
 
     private static List<XElement> GetOrCreate(Dictionary<int, List<XElement>> dictionary, int key)
     {

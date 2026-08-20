@@ -293,7 +293,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _maxDrawablesPerComponent;
         set
         {
-            if (SetProperty(ref _maxDrawablesPerComponent, Math.Max(1, value)))
+            if (SetProperty(ref _maxDrawablesPerComponent, Math.Clamp(value, 1, ClothingConstants.MaximumDrawablesPerComponent)))
             {
                 ResetPlanState();
             }
@@ -305,7 +305,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         get => _maxDrawablesPerProp;
         set
         {
-            if (SetProperty(ref _maxDrawablesPerProp, Math.Max(1, value)))
+            if (SetProperty(ref _maxDrawablesPerProp, Math.Clamp(value, 1, ClothingConstants.MaximumDrawablesPerProp)))
             {
                 ResetPlanState();
             }
@@ -1203,8 +1203,8 @@ public sealed class MainWindowViewModel : ViewModelBase
         _targetPrefix = settings.TargetPrefix;
         _femalePrefix = settings.FemalePrefix;
         _malePrefix = settings.MalePrefix;
-        _maxDrawablesPerComponent = settings.MaxDrawablesPerComponent;
-        _maxDrawablesPerProp = settings.MaxDrawablesPerProp;
+        _maxDrawablesPerComponent = Math.Clamp(settings.MaxDrawablesPerComponent, 1, ClothingConstants.MaximumDrawablesPerComponent);
+        _maxDrawablesPerProp = Math.Clamp(settings.MaxDrawablesPerProp, 1, ClothingConstants.MaximumDrawablesPerProp);
         _includeYmtXml = settings.IncludeYmtXml;
         _includeDebugClient = settings.IncludeDebugClient;
         _overwriteXml = settings.OverwriteXml;

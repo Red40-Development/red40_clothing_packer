@@ -6,8 +6,12 @@ public static class ClothingConstants
 {
     public const int ComponentSlotCount = 12;
     public const int MissingComponent = 255;
-    public const int DefaultMaxDrawablesPerComponent = 256;
-    public const int DefaultMaxDrawablesPerProp = 256;
+    // Cfx widened component sync to 8 bits, but streamed collection index 255 does not load.
+    public const int MaximumDrawablesPerComponent = 255;
+    // numAvailProps stores the count in one byte, so 256 would wrap to zero.
+    public const int MaximumDrawablesPerProp = 255;
+    public const int DefaultMaxDrawablesPerComponent = MaximumDrawablesPerComponent;
+    public const int DefaultMaxDrawablesPerProp = MaximumDrawablesPerProp;
 
     public static readonly IReadOnlyDictionary<int, string> ComponentPrefixes =
         new ReadOnlyDictionary<int, string>(new Dictionary<int, string>

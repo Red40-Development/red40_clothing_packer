@@ -8,6 +8,26 @@ public sealed class PlanValidator
     {
         var errors = new List<string>();
         errors.AddRange(plan.Errors);
+        var componentCapacity = Math.Clamp(
+            plan.Settings.MaxDrawablesPerComponent,
+            1,
+            ClothingConstants.MaximumDrawablesPerComponent);
+        var propCapacity = Math.Clamp(
+            plan.Settings.MaxDrawablesPerProp,
+            1,
+            ClothingConstants.MaximumDrawablesPerProp);
+
+        if (plan.Settings.MaxDrawablesPerComponent <= 0
+            || plan.Settings.MaxDrawablesPerComponent > ClothingConstants.MaximumDrawablesPerComponent)
+        {
+            errors.Add($"Configured component drawable capacity must be between 1 and {ClothingConstants.MaximumDrawablesPerComponent}.");
+        }
+
+        if (plan.Settings.MaxDrawablesPerProp <= 0
+            || plan.Settings.MaxDrawablesPerProp > ClothingConstants.MaximumDrawablesPerProp)
+        {
+            errors.Add($"Configured prop drawable capacity must be between 1 and {ClothingConstants.MaximumDrawablesPerProp}; 256 cannot be represented by the YMT numAvailProps field.");
+        }
 
         foreach (var target in plan.TargetCollections)
         {
@@ -18,16 +38,16 @@ public sealed class PlanValidator
 
             foreach (var component in target.ComponentCounts)
             {
-                if (component.Value > plan.Settings.MaxDrawablesPerComponent)
+                if (component.Value > componentCapacity)
                 {
-                    errors.Add($"Target collection {target.FullCollectionName} component {component.Key} exceeds the configured drawable capacity.");
+                    errors.Add($"Target collection {target.FullCollectionName} component {component.Key} exceeds the safe drawable capacity of {componentCapacity}.");
                 }
             }
 
             var propCount = target.PropCounts.Values.Sum();
-            if (propCount > plan.Settings.MaxDrawablesPerProp)
+            if (propCount > propCapacity)
             {
-                errors.Add($"Target collection {target.FullCollectionName} contains {propCount} aggregate props, exceeding the configured capacity of {plan.Settings.MaxDrawablesPerProp}.");
+                errors.Add($"Target collection {target.FullCollectionName} contains {propCount} aggregate props, exceeding the safe capacity of {propCapacity}.");
             }
         }
 

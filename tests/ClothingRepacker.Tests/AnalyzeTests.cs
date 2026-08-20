@@ -8,6 +8,27 @@ namespace ClothingRepacker.Tests;
 
 public class AnalyzeTests
 {
+    [Theory]
+    [InlineData(256, 255, "Component drawable limit cannot exceed 255")]
+    [InlineData(255, 256, "Prop drawable limit cannot exceed 255")]
+    public async Task AnalyzeRejectsUnrepresentableDrawableLimits(int componentLimit, int propLimit, string expectedMessage)
+    {
+        var resources = Path.Combine(Path.GetTempPath(), $"invalid-drawable-limit-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(resources);
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => service.AnalyzeAsync(
+            resources,
+            "zz_merged_clothing_meta",
+            new MergePlanSettings
+            {
+                MaxDrawablesPerComponent = componentLimit,
+                MaxDrawablesPerProp = propLimit,
+            }));
+
+        Assert.Contains(expectedMessage, exception.Message);
+    }
+
     [Fact]
     public async Task AnalyzeRecordsErroredFilePathForInvalidSourceXml()
     {
