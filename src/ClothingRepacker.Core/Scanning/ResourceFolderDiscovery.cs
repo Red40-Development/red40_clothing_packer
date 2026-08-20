@@ -88,7 +88,7 @@ public static class ResourceFolderDiscovery
         return resources;
     }
 
-    private static bool IsBracketFolder(string path)
+    public static bool IsBracketFolder(string path)
     {
         var name = Path.GetFileName(path);
         return name.Contains('[') && name.Contains(']');

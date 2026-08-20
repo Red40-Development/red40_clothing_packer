@@ -66,14 +66,37 @@ public sealed class RepackerService
         }
 
         var fullGeneratedResourcesRoot = Path.GetFullPath(generatedResourcesRoot);
+        var scanItems = _scanner.ScanResourceFolders(resourceFolders, progress, cancellationToken);
         return await AnalyzeAsync(
-            _scanner.ScanResourceFolders(resourceFolders, progress, cancellationToken),
-            fullGeneratedResourcesRoot,
+            scanItems,
+            FindCommonResourcesRoot(scanItems.Select(item => item.ResourceRoot)),
             fullGeneratedResourcesRoot,
             targetResource,
             settings,
             progress,
             cancellationToken);
+    }
+
+    private static string FindCommonResourcesRoot(IEnumerable<string> resourceRoots)
+    {
+        var roots = resourceRoots.Select(Path.GetFullPath).ToList();
+        var commonRoot = Directory.GetParent(roots[0])?.FullName ?? roots[0];
+
+        foreach (var root in roots.Skip(1))
+        {
+            while (!IsPathAtOrInside(root, commonRoot))
+            {
+                commonRoot = Directory.GetParent(commonRoot)?.FullName
+                    ?? throw new InvalidOperationException("Selected resource folders do not share a common root.");
+            }
+        }
+
+        if (ResourceFolderDiscovery.IsBracketFolder(commonRoot))
+        {
+            return Directory.GetParent(commonRoot)?.FullName ?? commonRoot;
+        }
+
+        return commonRoot;
     }
 
     private async Task<AnalyzeResult> AnalyzeAsync(IReadOnlyList<ResourceScanItem> scanItems, string resourcesRoot, string generatedResourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -2487,7 +2510,19 @@ public sealed class RepackerService
 
     private static string BuildFxManifest(MergePlan plan, BuildOptions options)
     {
-        var dependencies = plan.SourceYmts.Select(source => source.Resource).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(value => value).ToList();
+        var dependencies = plan.ResourceRoots.Count > 0
+            ? plan.ResourceRoots
+                .Where(root => !string.IsNullOrWhiteSpace(root))
+                .Select(root => Path.GetFileName(NormalizePath(root)))
+                .Where(resource => !string.IsNullOrWhiteSpace(resource))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value)
+                .ToList()
+            : plan.SourceYmts
+                .Select(source => source.Resource)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(value => value)
+                .ToList();
         var dataFiles = plan.TargetCollections
             .OrderBy(target => target.FullCollectionName)
             .Select(target => $"data_file 'SHOP_PED_APPAREL_META_FILE' 'data/{target.FullCollectionName}.meta'");

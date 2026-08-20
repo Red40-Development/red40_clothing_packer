@@ -1025,7 +1025,9 @@ public sealed class MainWindowViewModel : ViewModelBase
 
         var firstResourcePath = ResourcePaths[0];
         var parent = Directory.GetParent(firstResourcePath)?.FullName ?? firstResourcePath;
-        var defaultRoot = Directory.GetParent(parent)?.FullName ?? parent;
+        var defaultRoot = ResourceFolderDiscovery.IsBracketFolder(parent)
+            ? Directory.GetParent(parent)?.FullName ?? parent
+            : parent;
         var defaultOutputRoot = CopyResourcesToOutputBeforeRename
             ? Path.Combine(defaultRoot, DefaultCopyOutputFolderName)
             : defaultRoot;

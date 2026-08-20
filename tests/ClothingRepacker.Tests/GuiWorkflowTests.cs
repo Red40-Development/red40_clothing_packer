@@ -17,14 +17,13 @@ public class GuiWorkflowTests
         vm.SelectResourcesFolder(root);
 
         var parent = Directory.GetParent(root)!.FullName;
-        var defaultRoot = Directory.GetParent(parent)!.FullName;
-        var outputRoot = Path.Combine(defaultRoot, "red40_output");
+        var outputRoot = Path.Combine(parent, "red40_output");
 
         Assert.Equal(root, vm.ResourcesPath);
         Assert.Equal([root], vm.ResourcePaths.ToArray());
         Assert.Equal(outputRoot, vm.OutputPath);
         Assert.Equal(outputRoot, vm.GeneratedResourcesRoot);
-        Assert.Equal(Path.Combine(defaultRoot, "backups"), vm.BackupRoot);
+        Assert.Equal(Path.Combine(parent, "backups"), vm.BackupRoot);
         Assert.Equal(Path.Combine(parent, "plan.json"), vm.PlanPath);
     }
 
@@ -39,7 +38,7 @@ public class GuiWorkflowTests
         var vm = CreateViewModel(workflow);
         vm.SelectResourcesFolder(root);
         var parent = Directory.GetParent(root)!.FullName;
-        var outputRoot = Path.Combine(Directory.GetParent(parent)!.FullName, "red40_output");
+        var outputRoot = Path.Combine(parent, "red40_output");
 
         await vm.AnalyzeAsync();
 
@@ -379,6 +378,43 @@ public class GuiWorkflowTests
         vm.AddResourceFolders([resource]);
 
         Assert.Equal([resource], vm.ResourcePaths.ToArray());
+    }
+
+    [Fact]
+    public async Task AddingSiblingResourceFoldersOneAtATimePreservesTheirResourcesRoot()
+    {
+        var root = CreateTempDirectory("gui-sequential-resource-root");
+        var first = Path.Combine(root, "first_pack");
+        var second = Path.Combine(root, "second_pack");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        File.WriteAllText(Path.Combine(first, "fxmanifest.lua"), "fx_version 'cerulean'");
+        File.WriteAllText(Path.Combine(second, "fxmanifest.lua"), "fx_version 'cerulean'");
+        var workflow = new FakeWorkflow();
+        var vm = CreateViewModel(workflow);
+
+        vm.AddResourceFolders([first]);
+        vm.AddResourceFolders([second]);
+        await vm.AnalyzeAsync();
+
+        Assert.Equal([first, second], workflow.AnalyzeResourceFolders);
+        Assert.Equal(Path.Combine(root, "red40_output"), workflow.AnalyzeGeneratedResourcesRoot);
+    }
+
+    [Fact]
+    public void AddingResourceInsideBracketFolderUsesContainingResourcesRoot()
+    {
+        var root = CreateTempDirectory("gui-bracket-default-root");
+        var category = Path.Combine(root, "[clothing]");
+        var resource = Path.Combine(category, "first_pack");
+        Directory.CreateDirectory(resource);
+        File.WriteAllText(Path.Combine(resource, "fxmanifest.lua"), "fx_version 'cerulean'");
+        var vm = CreateViewModel();
+
+        vm.AddResourceFolders([resource]);
+
+        Assert.Equal(Path.Combine(root, "red40_output"), vm.OutputPath);
+        Assert.Equal(Path.Combine(root, "backups"), vm.BackupRoot);
     }
 
     [Fact]

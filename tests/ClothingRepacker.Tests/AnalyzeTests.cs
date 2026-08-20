@@ -183,7 +183,32 @@ public class AnalyzeTests
         Assert.All(analyze.Plan.SourceYmts, source => Assert.Equal("gang_flags", source.Resource));
         Assert.DoesNotContain(analyze.Plan.SourceYmts, source => source.Resource.Equals("gang_outfits", StringComparison.OrdinalIgnoreCase));
         Assert.Equal([Path.GetFullPath(selected)], analyze.Plan.ResourceRoots);
+        Assert.Equal(Path.GetFullPath(resources), analyze.Plan.ResourcesRoot);
         Assert.Equal(Path.GetFullPath(Path.Combine(root, "generated")), analyze.Plan.GeneratedResourcesRoot);
+    }
+
+    [Fact]
+    public async Task ExplicitResourceFoldersPopulateManifestDependenciesFromSelectedRoots()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"explicit-resource-dependency-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var first = Path.Combine(resources, "gang_flags");
+        var second = Path.Combine(resources, "stream_only_pack");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), first);
+        Directory.CreateDirectory(Path.Combine(second, "stream"));
+        await File.WriteAllTextAsync(Path.Combine(second, "fxmanifest.lua"), "fx_version 'cerulean'");
+        await File.WriteAllTextAsync(Path.Combine(second, "stream", "shirt.ydd"), "drawable");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([first, second], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "preview");
+
+        await service.BuildAsync(analyze.Plan, outputRoot);
+
+        var manifest = await File.ReadAllTextAsync(Path.Combine(outputRoot, "zz_merged_clothing_meta", "fxmanifest.lua"));
+        Assert.Contains("'gang_flags'", manifest, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'stream_only_pack'", manifest, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(Path.GetFullPath(resources), analyze.Plan.ResourcesRoot);
     }
 
     [Fact]
@@ -208,6 +233,7 @@ public class AnalyzeTests
         Assert.Contains("'gang_outfits'", manifest, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("[clothing]", manifest, StringComparison.OrdinalIgnoreCase);
         Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], analyze.Plan.ResourceRoots);
+        Assert.Equal(Path.GetFullPath(resources), analyze.Plan.ResourcesRoot);
         Assert.DoesNotContain(analyze.Plan.SourceYmts, source => source.Resource.Contains('['));
     }
 
