@@ -94,27 +94,70 @@ public sealed class OutputCollectionBuilder
     public IReadOnlyList<PropMapping> AddProps(SourceYmt source, IReadOnlyDictionary<int, SourceIndexRange> propRanges)
     {
         var mappings = new List<PropMapping>();
+        foreach (var rangeEntry in propRanges)
+        {
+            var range = rangeEntry.Value;
+            if (rangeEntry.Key != range.SlotId)
+            {
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} is keyed by anchor {rangeEntry.Key}, but declares anchor {range.SlotId}.");
+            }
+
+            if (range.StartIndex < 0 || range.Count < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} anchor {range.SlotId} has invalid ordinal start/count ({range.StartIndex}, {range.Count}).");
+            }
+
+            if (range.Count > 0 && source.Props.All(prop => prop.AnchorId != range.SlotId))
+            {
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} anchor {range.SlotId} has no matching source prop block.");
+            }
+        }
+
         foreach (var prop in source.Props.OrderBy(p => p.AnchorId))
         {
-            if (!propRanges.TryGetValue(prop.AnchorId, out var range) || range.Count <= 0)
+            if (!propRanges.TryGetValue(prop.AnchorId, out var range))
             {
                 continue;
             }
 
-            var targetProps = GetOrCreate(_props, prop.AnchorId);
-            var targetOffset = targetProps.Count;
+            if (range.StartIndex < 0 || range.Count < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} anchor {prop.AnchorId} has invalid ordinal start/count ({range.StartIndex}, {range.Count}).");
+            }
+
             var ordered = prop.Props
                 .OrderBy(item => ValueAttr(RequiredElement(item, "propId")))
-                .Where(item =>
-                {
-                    var propId = ValueAttr(RequiredElement(item, "propId"));
-                    return propId >= range.StartIndex && propId < range.StartIndex + range.Count;
-                })
                 .ToList();
-
-            for (var ordinal = 0; ordinal < ordered.Count; ordinal++)
+            if (range.StartIndex > ordered.Count || range.Count > ordered.Count - range.StartIndex)
             {
-                var clone = new XElement(ordered[ordinal]);
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} anchor {prop.AnchorId} selects {range.Count} props at ordinal {range.StartIndex}, but the source contains {ordered.Count} props.");
+            }
+
+            if (range.Count == 0)
+            {
+                continue;
+            }
+
+            var selected = ordered
+                .Skip(range.StartIndex)
+                .Take(range.Count)
+                .ToList();
+            if (selected.Count != range.Count)
+            {
+                throw new InvalidOperationException(
+                    $"Prop range for {source.YmtPath} anchor {prop.AnchorId} selected {selected.Count} props; expected {range.Count}.");
+            }
+
+            var targetProps = GetOrCreate(_props, prop.AnchorId);
+            var targetOffset = targetProps.Count;
+            for (var ordinal = 0; ordinal < selected.Count; ordinal++)
+            {
+                var clone = new XElement(selected[ordinal]);
                 var oldPropId = ValueAttr(RequiredElement(clone, "propId"));
                 var newPropId = targetOffset + ordinal;
                 SetValueAttr(RequiredElement(clone, "propId"), newPropId);

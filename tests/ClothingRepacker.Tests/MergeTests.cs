@@ -32,6 +32,84 @@ public class MergeTests
     }
 
     [Fact]
+    public void BuilderUsesOrdinalRangesAndPreservesSparsePropIds()
+    {
+        var source = CreateSourceYmtWithPropIds("sparse-props", 0, 2);
+        var builder = new OutputCollectionBuilder(
+            "merged_m_001",
+            "mp_m_freemode_01_merged_m_001",
+            "mp_m_freemode_01",
+            PedGender.Male);
+
+        var mappings = builder.AddProps(
+            source,
+            new Dictionary<int, SourceIndexRange>
+            {
+                [0] = new SourceIndexRange(source.YmtPath, 0, 0, 2),
+            });
+
+        Assert.Equal([0, 2], mappings.Select(mapping => mapping.OldPropIndex));
+        Assert.Equal([0, 1], mappings.Select(mapping => mapping.NewPropIndex));
+        Assert.Equal(
+            [0, 1],
+            builder.BuildXml().Root!
+                .Element("propInfo")!
+                .Element("aPropMetaData")!
+                .Elements("Item")
+                .Select(item => int.Parse(item.Element("propId")!.Attribute("value")!.Value)));
+    }
+
+    [Fact]
+    public void BuilderSplitsSparsePropIdsWithoutDroppingAnyPage()
+    {
+        var source = CreateSourceYmtWithPropIds("sparse-page-props", 0, 2, 7);
+        var builder = new OutputCollectionBuilder(
+            "merged_m_001",
+            "mp_m_freemode_01_merged_m_001",
+            "mp_m_freemode_01",
+            PedGender.Male);
+
+        var firstPage = builder.AddProps(
+            source,
+            new Dictionary<int, SourceIndexRange>
+            {
+                [0] = new SourceIndexRange(source.YmtPath, 0, 0, 2),
+            });
+        var secondPage = builder.AddProps(
+            source,
+            new Dictionary<int, SourceIndexRange>
+            {
+                [0] = new SourceIndexRange(source.YmtPath, 0, 2, 1),
+            });
+
+        Assert.Equal([0, 2], firstPage.Select(mapping => mapping.OldPropIndex));
+        Assert.Equal([7], secondPage.Select(mapping => mapping.OldPropIndex));
+        Assert.Equal([0, 1, 2], firstPage.Concat(secondPage).Select(mapping => mapping.NewPropIndex));
+        Assert.Equal(3, builder.GetPropCounts()[0]);
+    }
+
+    [Fact]
+    public void BuilderRejectsPropRangeThatExceedsOrdinalSourceCount()
+    {
+        var source = CreateSourceYmtWithPropIds("short-prop-range", 0, 2);
+        var builder = new OutputCollectionBuilder(
+            "merged_m_001",
+            "mp_m_freemode_01_merged_m_001",
+            "mp_m_freemode_01",
+            PedGender.Male);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => builder.AddProps(
+            source,
+            new Dictionary<int, SourceIndexRange>
+            {
+                [0] = new SourceIndexRange(source.YmtPath, 0, 1, 2),
+            }));
+
+        Assert.Contains("selects 2 props at ordinal 1", exception.Message);
+        Assert.Contains("source contains 2 props", exception.Message);
+    }
+
+    [Fact]
     public void PlannerUsesSeparateComponentAndPropLimits()
     {
         var planner = new MergePlanner();
@@ -361,6 +439,25 @@ public class MergeTests
             Messages: Array.Empty<ValidationMessage>());
     }
 
+    private static SourceYmt CreateSourceYmtWithPropIds(string pathSuffix, params int[] propIds)
+    {
+        var source = CreateSourceYmt(pathSuffix, 0, 0);
+        return source with
+        {
+            Props =
+            [
+                new PropBlock(
+                    0,
+                    propIds.Select(propId =>
+                        new XElement(
+                            "Item",
+                            new XElement("texData", new XAttribute("itemType", "CPedPropTexData"),
+                                new XElement("Item", new XElement("texId", new XAttribute("value", 0)))),
+                            new XElement("anchorId", new XAttribute("value", 0)),
+                            new XElement("propId", new XAttribute("value", propId)))).ToList()),
+            ],
+        };
+    }
     private static XDocument BuildOutputXml(OutputCollectionCapacity output)
     {
         var builder = new OutputCollectionBuilder(

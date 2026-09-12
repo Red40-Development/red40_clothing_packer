@@ -114,41 +114,103 @@ public sealed class PedVariationReader
         }
 
         var metadata = Items(propInfo.Element("aPropMetaData"));
-        var repairHints = metadata
-            .Where(item => TryGetValue(item, "anchorId", out var anchorId)
-                           && anchorId == 0
-                           && TryGetValue(item, "propId", out var propId)
-                           && propId >= 0
-                           && TryGetFloatArrayValue(item, "expressionMods", 0, out var hairScaleExpression)
+        var validItems = new List<(XElement Item, int Index, int AnchorId, int PropId)>();
+        var seenIds = new HashSet<(int AnchorId, int PropId)>();
+
+        for (var index = 0; index < metadata.Count; index++)
+        {
+            var item = metadata[index];
+            var validAnchor = TryReadPropId(item, "anchorId", index, messages, out var anchorId);
+            var validProp = TryReadPropId(item, "propId", index, messages, out var propId);
+            if (!validAnchor || !validProp)
+            {
+                continue;
+            }
+
+            if (!seenIds.Add((anchorId, propId)))
+            {
+                messages.Add(new(
+                    ValidationSeverity.Error,
+                    "duplicate-propId",
+                    $"Prop metadata item {index} duplicates anchorId {anchorId} and propId {propId}."));
+                continue;
+            }
+
+            validItems.Add((new XElement(item), index, anchorId, propId));
+        }
+
+        var repairHints = validItems
+            .Where(item => item.AnchorId == 0
+                           && TryGetFloatArrayValue(item.Item, "expressionMods", 0, out var hairScaleExpression)
                            && hairScaleExpression != 0)
-            .Select(item => new CreaturePropRepairHint(GetValue(item, "anchorId"), GetValue(item, "propId")))
+            .Select(item => new CreaturePropRepairHint(item.AnchorId, item.PropId))
             .ToList();
 
-        var grouped = metadata
-            .Select((item, index) => new
-            {
-                Item = new XElement(item),
-                Index = index,
-                AnchorId = TryGetValue(item, "anchorId", out var anchorId) ? anchorId : -1,
-                PropId = TryGetValue(item, "propId", out var propId) ? propId : -1,
-            })
+        var grouped = validItems
             .GroupBy(item => item.AnchorId)
             .OrderBy(group => group.Key);
 
         var results = new List<PropBlock>();
         foreach (var group in grouped)
         {
-            var duplicates = group.GroupBy(item => item.PropId).Where(item => item.Key >= 0 && item.Count() > 1);
-            foreach (var duplicate in duplicates)
-            {
-                messages.Add(new(ValidationSeverity.Warning, "duplicate-propId", $"Anchor {group.Key} has duplicate propId {duplicate.Key}."));
-            }
-
-            var ordered = group.OrderBy(item => item.PropId).ThenBy(item => item.Index).Select(item => item.Item).ToList();
+            var ordered = group
+                .OrderBy(item => item.PropId)
+                .ThenBy(item => item.Index)
+                .Select(item => item.Item)
+                .ToList();
             results.Add(new PropBlock(group.Key, ordered));
         }
 
         return (results, repairHints);
+    }
+
+    private static bool TryReadPropId(
+        XElement item,
+        string name,
+        int itemIndex,
+        List<ValidationMessage> messages,
+        out int value)
+    {
+        value = 0;
+        var field = item.Element(name);
+        if (field is null)
+        {
+            messages.Add(new(
+                ValidationSeverity.Error,
+                $"missing-prop-{name}",
+                $"Prop metadata item {itemIndex} is missing {name}."));
+            return false;
+        }
+
+        var attribute = field.Attribute("value");
+        if (attribute is null)
+        {
+            messages.Add(new(
+                ValidationSeverity.Error,
+                $"missing-prop-{name}-value",
+                $"Prop metadata item {itemIndex} is missing the value attribute on {name}."));
+            return false;
+        }
+
+        if (!XmlHelpers.TryParseIntValue(attribute.Value, out value))
+        {
+            messages.Add(new(
+                ValidationSeverity.Error,
+                $"malformed-prop-{name}",
+                $"Prop metadata item {itemIndex} has malformed {name} value '{attribute.Value}'."));
+            return false;
+        }
+
+        if (value < 0)
+        {
+            messages.Add(new(
+                ValidationSeverity.Error,
+                $"negative-prop-{name}",
+                $"Prop metadata item {itemIndex} has negative {name} value {value}."));
+            return false;
+        }
+
+        return true;
     }
 
     private static (string PedBaseName, PedGender Gender, string CollectionName, string FullCollectionName) InferIdentity(string ymtPath, string? collectionName)

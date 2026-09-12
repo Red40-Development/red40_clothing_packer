@@ -65,10 +65,82 @@ public class PedVariationReaderTests
         Assert.Equal(PedGender.Male, result.Gender);
     }
 
+    [Fact]
+    public void ReportsMalformedPropIdentifiersAndSkipsInvalidEntriesDeterministically()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "mp_m_freemode_01_malformed_props.ymt.xml");
+        var doc = BuildPropVariationXml(
+            new XElement("Item", new XElement("propId", new XAttribute("value", 0))),
+            new XElement("Item", new XElement("anchorId", new XAttribute("value", 0))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", "not-an-integer")),
+                new XElement("propId", new XAttribute("value", 0))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", "not-an-integer"))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", -1)),
+                new XElement("propId", new XAttribute("value", 0))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", -1))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", 2))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", 2))));
+
+        var result = _reader.Read(doc, path, "malformed", Path.GetTempPath());
+
+        Assert.Equal(
+            [
+                "missing-prop-anchorId",
+                "missing-prop-propId",
+                "malformed-prop-anchorId",
+                "malformed-prop-propId",
+                "negative-prop-anchorId",
+                "negative-prop-propId",
+                "duplicate-propId",
+            ],
+            result.Messages.Select(message => message.Code));
+        var propBlock = Assert.Single(result.Props);
+        Assert.Equal([2], propBlock.Props.Select(item => int.Parse(item.Element("propId")!.Attribute("value")!.Value)));
+    }
+
+    [Fact]
+    public void PreservesSparsePropOrderingByPropIdThenDocumentOrder()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "mp_m_freemode_01_sparse_props.ymt.xml");
+        var doc = BuildPropVariationXml(
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", 2))),
+            new XElement("Item",
+                new XElement("anchorId", new XAttribute("value", 0)),
+                new XElement("propId", new XAttribute("value", 0))));
+
+        var result = _reader.Read(doc, path, "sparse", Path.GetTempPath());
+
+        var propBlock = Assert.Single(result.Props);
+        Assert.Equal([0, 2], propBlock.Props.Select(item => int.Parse(item.Element("propId")!.Attribute("value")!.Value)));
+        Assert.Empty(result.Messages);
+    }
+
+    private static XDocument BuildPropVariationXml(params XElement[] props)
+        => new(
+            new XElement("CPedVariationInfo",
+                new XElement("availComp", "255 255 255 255 255 255 255 255 255 255 255 255"),
+                new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
+                new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
+                new XElement("propInfo",
+                    new XElement("aPropMetaData", new XAttribute("itemType", "CPedPropMetaData"), props)),
+                new XElement("dlcName", "hash_00000000")));
+
     private static XDocument BuildMinimalPedVariationXml()
         => new(
             new XElement("CPedVariationInfo",
-                new XElement("availComp", "-1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1"),
+                new XElement("availComp", "255 255 255 255 255 255 255 255 255 255 255 255"),
                 new XElement("aComponentData3", new XAttribute("itemType", "CPVComponentData")),
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
                 new XElement("dlcName", "hash_00000000")));
