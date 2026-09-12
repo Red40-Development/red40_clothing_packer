@@ -283,6 +283,16 @@ public class ApplyRestoreTests
         var resourceRoot = Path.Combine(resources, "gang_flags");
         TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
 
+        var sourceManifest = Path.Combine(resourceRoot, "fxmanifest.lua");
+        const string unrelatedFilesEntry = "  'data/unrelated.meta'";
+        const string unrelatedDataFileEntry = "data_file 'SHOP_PED_APPAREL_META_FILE' 'data/unrelated.meta'";
+        var unrelatedMetadata = Path.Combine(resourceRoot, "data", "unrelated.meta");
+        Directory.CreateDirectory(Path.GetDirectoryName(unrelatedMetadata)!);
+        await File.WriteAllTextAsync(unrelatedMetadata, "<Unrelated />");
+        await File.AppendAllTextAsync(
+            sourceManifest,
+            $"{Environment.NewLine}files {{{Environment.NewLine}{unrelatedFilesEntry}{Environment.NewLine}}}{Environment.NewLine}{unrelatedDataFileEntry}{Environment.NewLine}");
+
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
 
@@ -294,11 +304,13 @@ public class ApplyRestoreTests
         var copiedManifest = Path.Combine(generatedRoot, "gang_flags", "fxmanifest.lua");
         Assert.True(File.Exists(copiedManifest));
         var manifestText = await File.ReadAllTextAsync(copiedManifest);
-        Assert.DoesNotContain("SHOP_PED_APPAREL_META_FILE", manifestText);
         Assert.DoesNotContain("ALTERNATE_VARIATIONS_FILE", manifestText);
         Assert.DoesNotContain("mp_m_freemode_01_mp_m_gang_flags.meta", manifestText);
         Assert.DoesNotContain("mp_f_freemode_01_mp_f_gang_flags.meta", manifestText);
         Assert.Contains("fx_version", manifestText);
+        Assert.Contains(unrelatedFilesEntry, manifestText);
+        Assert.Contains(unrelatedDataFileEntry, manifestText);
+        Assert.Equal("<Unrelated />", await File.ReadAllTextAsync(Path.Combine(generatedRoot, "gang_flags", "data", "unrelated.meta")));
     }
 
     [Fact]
@@ -386,28 +398,18 @@ public class ApplyRestoreTests
     }
 
     [Fact]
-    public async Task ApplyFallsBackForOldPlansWithoutGeneratedResourcesRoot()
+    public async Task LoadPlanRejectsLegacySchemaWithoutFallback()
     {
-        var root = Path.Combine(Path.GetTempPath(), $"old-plan-apply-test-{Guid.NewGuid():N}");
-        var resources = Path.Combine(root, "resources");
-        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(resources, "gang_flags"));
-
-        var sourceDrawable = Path.Combine(resources, "gang_flags", "stream", "mp_f_freemode_01_mp_f_gang_flags^decl_000_u.ydd");
-        await File.WriteAllTextAsync(sourceDrawable, "drawable");
+        var root = Path.Combine(Path.GetTempPath(), $"old-plan-load-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
 
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
-        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
         var planPath = Path.Combine(root, "old-plan.json");
-        await service.SavePlanAsync(analyze.Plan, planPath);
-        var json = JsonNode.Parse(await File.ReadAllTextAsync(planPath))!.AsObject();
-        json["generatedResourcesRoot"] = string.Empty;
-        json["resourceRoots"] = new JsonArray();
-        await File.WriteAllTextAsync(planPath, json.ToJsonString());
-        var oldPlan = await service.LoadPlanAsync(planPath);
+        await File.WriteAllTextAsync(planPath, """{"schemaVersion":1,"resourceRoots":[],"sourceFiles":[]}""");
 
-        await service.ApplyAsync(oldPlan, Path.Combine(root, "backups"));
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(() => service.LoadPlanAsync(planPath));
 
-        Assert.True(Directory.Exists(Path.Combine(root, "zz_merged_clothing_meta")));
+        Assert.Contains("unsupported plan schema version", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -469,7 +471,270 @@ public class ApplyRestoreTests
         Assert.True(File.Exists(firstPersonAlternates));
     }
 
+    [Fact]
+    public async Task ApplyRejectsChangedManifestBeforeCreatingBackupRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"changed-source-apply-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
+        var manifestPath = Path.Combine(resourceRoot, "fxmanifest.lua");
+        await File.AppendAllTextAsync(manifestPath, $"{Environment.NewLine}-- changed after Analyze");
+        var backupRoot = Path.Combine(root, "backups");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ApplyAsync(analyze.Plan, backupRoot));
+
+        Assert.Contains(manifestPath, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(backupRoot));
+        Assert.False(Directory.Exists(Path.Combine(root, "generated")));
+    }
+
+    [Fact]
+    public async Task RestoreRejectsModifiedGeneratedFileWithoutMutatingSources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"modified-output-restore-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var sourceYmt = Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt");
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"));
+        var backupManifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        var generatedMetadata = Directory.GetFiles(
+            Path.Combine(generatedRoot, "zz_merged_clothing_meta", "data"),
+            "*.meta",
+            SearchOption.TopDirectoryOnly).First();
+        var generatedBefore = await File.ReadAllBytesAsync(generatedMetadata);
+        await File.AppendAllTextAsync(generatedMetadata, $"{Environment.NewLine}user modification");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RestoreAsync(backupManifest));
+
+        Assert.Contains(generatedMetadata, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(sourceYmt));
+        Assert.EndsWith("user modification", await File.ReadAllTextAsync(generatedMetadata));
+
+        await File.WriteAllBytesAsync(generatedMetadata, generatedBefore);
+        await service.RestoreAsync(backupManifest);
+        Assert.True(File.Exists(sourceYmt));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+    }
+
+    [Fact]
+    public async Task RestorePreviewRejectsManifestPathOutsideRecordedRoots()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"tampered-restore-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+        await service.ApplyAsync(analyze.Plan, Path.Combine(root, "backups"));
+        var backupManifest = Directory.GetFiles(Path.Combine(root, "backups"), "backup-manifest.json", SearchOption.AllDirectories).Single();
+        var document = JsonNode.Parse(await File.ReadAllTextAsync(backupManifest))!.AsObject();
+        var entry = document["entries"]!.AsArray()
+            .Select(node => node!.AsObject())
+            .First(node => node["kind"]!.GetValue<string>() == "old-ymt");
+        var outsidePath = Path.Combine(Path.GetTempPath(), $"outside-restore-{Guid.NewGuid():N}.ymt");
+        entry["originalPath"] = outsidePath;
+        await File.WriteAllTextAsync(backupManifest, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.LoadRestoreManifestPreviewAsync(backupManifest));
+
+        Assert.Contains("outside recorded roots", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(outsidePath));
+    }
+
+    [Fact]
+    public async Task SavePlanCreatesNestedParentDirectory()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"nested-plan-save-test-{Guid.NewGuid():N}");
+        var planPath = Path.Combine(root, "nested", "plans", "plan.json");
+        var service = new RepackerService(new XmlPassthroughYmtCodec());
+
+        await service.SavePlanAsync(new MergePlan(), planPath);
+
+        Assert.True(File.Exists(planPath));
+        var saved = JsonSerializer.Deserialize<MergePlan>(await File.ReadAllTextAsync(planPath));
+        Assert.NotNull(saved);
+    }
+
+    [Fact]
+    public async Task CopyModeApplyCancellationLeavesRestorableJournal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"apply-cancellation-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var generatedRoot = Path.Combine(root, "generated");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+        using var cancellation = new CancellationTokenSource();
+        var progress = new InlineProgress<OperationProgress>(update =>
+        {
+            if (update.Stage == "copy-source-file" && update.Current == 1)
+            {
+                cancellation.Cancel();
+            }
+        });
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync([resourceRoot], generatedRoot, "zz_merged_clothing_meta", new MergePlanSettings());
+        var backupRoot = Path.Combine(root, "backups");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ApplyAsync(
+            analyze.Plan,
+            backupRoot,
+            new ApplyOptions { CopyResourcesToOutputBeforeRename = true },
+            progress,
+            cancellation.Token));
+
+        var backupManifest = Directory.GetFiles(backupRoot, "backup-manifest.json", SearchOption.AllDirectories).Single();
+        Assert.True(File.Exists(Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt")));
+        await service.RestoreAsync(backupManifest);
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "gang_flags")));
+        Assert.False(Directory.Exists(Path.Combine(generatedRoot, "zz_merged_clothing_meta")));
+    }
+
+    [Fact]
+    public async Task ApplyRejectsGeneratedTargetContainingSourceResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"apply-source-container-collision-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(
+            [resourceRoot],
+            root,
+            "resources",
+            new MergePlanSettings());
+        var backupRoot = Path.Combine(root, "backups");
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.ApplyAsync(analyze.Plan, backupRoot));
+
+        Assert.Contains("must not overlap a selected source root", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt")));
+        Assert.False(Directory.Exists(backupRoot));
+        Assert.False(File.Exists(Path.Combine(resources, ".clothing-repacker-owned")));
+    }
+
+    [Fact]
+    public async Task RestoreReconcilesPlannedStreamMoveFromRecordedHash()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"planned-stream-restore-test-{Guid.NewGuid():N}");
+        var sourceRoot = Path.Combine(root, "resource");
+        var generatedRoot = Path.Combine(root, "generated");
+        var backupRoot = Path.Combine(root, "backups");
+        var manifestDirectory = Path.Combine(backupRoot, "run");
+        var originalPath = Path.Combine(sourceRoot, "stream", "old.ydd");
+        var appliedPath = Path.Combine(sourceRoot, "stream", "new.ydd");
+        Directory.CreateDirectory(Path.GetDirectoryName(appliedPath)!);
+        Directory.CreateDirectory(manifestDirectory);
+        await File.WriteAllTextAsync(appliedPath, "stream contents");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(appliedPath)));
+        var manifest = new BackupManifest
+        {
+            BackupRoot = backupRoot,
+            SourceRoots = [sourceRoot],
+            GeneratedResourcesRoot = generatedRoot,
+            Entries =
+            [
+                new BackupEntry("stream-rename", originalPath, null, appliedPath, hash, null, DateTimeOffset.UtcNow, "planned"),
+            ],
+        };
+        var manifestPath = Path.Combine(manifestDirectory, "backup-manifest.json");
+        await File.WriteAllTextAsync(
+            manifestPath,
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        var service = new RepackerService(new XmlPassthroughYmtCodec());
+
+        await service.RestoreAsync(manifestPath);
+
+        Assert.Equal("stream contents", await File.ReadAllTextAsync(originalPath));
+        Assert.False(File.Exists(appliedPath));
+    }
+
+    [Fact]
+    public async Task RestoreRejectsUnreconciledPlannedStreamMove()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"planned-stream-conflict-test-{Guid.NewGuid():N}");
+        var sourceRoot = Path.Combine(root, "resource");
+        var generatedRoot = Path.Combine(root, "generated");
+        var backupRoot = Path.Combine(root, "backups");
+        var manifestDirectory = Path.Combine(backupRoot, "run");
+        var originalPath = Path.Combine(sourceRoot, "stream", "old.ydd");
+        var appliedPath = Path.Combine(sourceRoot, "stream", "new.ydd");
+        Directory.CreateDirectory(Path.GetDirectoryName(appliedPath)!);
+        Directory.CreateDirectory(manifestDirectory);
+        await File.WriteAllTextAsync(appliedPath, "modified contents");
+        var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("original contents"u8));
+        var manifest = new BackupManifest
+        {
+            BackupRoot = backupRoot,
+            SourceRoots = [sourceRoot],
+            GeneratedResourcesRoot = generatedRoot,
+            Entries =
+            [
+                new BackupEntry("stream-rename", originalPath, null, appliedPath, expectedHash, null, DateTimeOffset.UtcNow, "planned"),
+            ],
+        };
+        var manifestPath = Path.Combine(manifestDirectory, "backup-manifest.json");
+        await File.WriteAllTextAsync(
+            manifestPath,
+            JsonSerializer.Serialize(manifest, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        var service = new RepackerService(new XmlPassthroughYmtCodec());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RestoreAsync(manifestPath));
+
+        Assert.Contains("could not be reconciled safely", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(originalPath));
+        Assert.Equal("modified contents", await File.ReadAllTextAsync(appliedPath));
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    [Fact]
+    public async Task LegacyRestoreRestoresHashedBackupButSkipsGeneratedDirectoryDeletion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"legacy-restore-test-{Guid.NewGuid():N}");
+        var manifestDirectory = Path.Combine(root, "backup");
+        var backupPath = Path.Combine(manifestDirectory, "source.ymt");
+        var originalPath = Path.Combine(root, "resources", "source.ymt");
+        var generatedResource = Path.Combine(root, "generated", "tool-output");
+        Directory.CreateDirectory(manifestDirectory);
+        Directory.CreateDirectory(generatedResource);
+        await File.WriteAllTextAsync(backupPath, "original source");
+        await File.WriteAllTextAsync(Path.Combine(generatedResource, "keep.txt"), "keep generated output");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(await File.ReadAllBytesAsync(backupPath)));
+        var entries = new List<BackupEntry>
+        {
+            new("old-ymt", originalPath, backupPath, null, hash, hash, DateTimeOffset.UtcNow),
+            new("generated-resource", generatedResource, null, generatedResource, string.Empty, null, DateTimeOffset.UtcNow),
+        };
+        var backupManifest = Path.Combine(manifestDirectory, "backup-manifest.json");
+        await File.WriteAllTextAsync(
+            backupManifest,
+            JsonSerializer.Serialize(entries, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        var service = new RepackerService(new XmlPassthroughYmtCodec());
+
+        var preview = await service.LoadRestoreManifestPreviewAsync(backupManifest);
+
+        Assert.Contains(preview.Actions, action => action.Kind == "copy-backup-file" && action.DestinationPath == originalPath);
+        Assert.Contains(preview.SkippedActions, action => action.Kind == "delete-generated-resource" && action.DestinationPath == generatedResource);
+        await service.RestoreAsync(backupManifest);
+        Assert.Equal("original source", await File.ReadAllTextAsync(originalPath));
+        Assert.True(File.Exists(Path.Combine(generatedResource, "keep.txt")));
+    }
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
+
         => new(
             new XElement("CPedVariationInfo",
                 new XAttribute("name", collectionName),

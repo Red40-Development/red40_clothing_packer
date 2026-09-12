@@ -116,6 +116,11 @@ public sealed class RepackerService
             throw new InvalidOperationException($"Prop drawable limit cannot exceed {ClothingConstants.MaximumDrawablesPerProp}; the YMT numAvailProps field is an unsigned byte and 256 wraps to zero.");
         }
 
+        if (!SafePath.IsSafeName(targetResource))
+        {
+            throw new InvalidOperationException($"Target resource name is unsafe: {targetResource}");
+        }
+
         ValidateGeneratedResourcesRoot(
             scanItems.Select(item => item.ResourceRoot),
             generatedResourcesRoot,
@@ -133,23 +138,27 @@ public sealed class RepackerService
         var manifestWarnings = new List<SourceManifestWarning>();
         var workItems = new List<(ResourceScanItem Item, string Path)>();
         var creatureMetadataReferencesByResource = new Dictionary<string, IReadOnlyList<ShopCreatureMetadataReference>>(StringComparer.OrdinalIgnoreCase);
+        var decodedDocuments = new Dictionary<string, Task<XDocument>>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var item in scanItems)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             creatureMetadataReferencesByResource[item.ResourceName] = ReadShopCreatureMetadataReferences(item.ShopMetaFiles);
-            alternateMetadata.AddRange(ReadAlternateMetadataFiles(item.ResourceName, item.ResourceRoot, item.ShopMetaFiles));
+            alternateMetadata.AddRange(ReadAlternateMetadataFiles(item.ResourceName, item.ResourceRoot, item.ShopMetaFiles, cancellationToken));
             streamFiles.AddRange(item.StreamFiles);
             if (item.ManifestPath is not null)
             {
                 manifestWarnings.AddRange(ReadManifestWarnings(item));
             }
 
-            var ymtFiles = await FilterDuplicateXmlSidecarsAsync(item.YmtFiles, cancellationToken);
+            var ymtFiles = await FilterDuplicateXmlSidecarsAsync(item.YmtFiles, cancellationToken, decodedDocuments);
             foreach (var path in ymtFiles.Where(IsLikelyPedVariationXml))
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 workItems.Add((item, path));
             }
         }
+
 
         progress?.Report(new OperationProgress(
             "analyze",
@@ -160,9 +169,11 @@ public sealed class RepackerService
         for (var index = 0; index < workItems.Count; index++)
         {
             var (item, path) = workItems[index];
+            cancellationToken.ThrowIfCancellationRequested();
+            XDocument? xml = null;
             try
             {
-                var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
+                xml = await DecodeToXmlCachedAsync(path, cancellationToken, decodedDocuments);
                 if (xml.Root?.Name.LocalName == "CCreatureMetaData")
                 {
                     var metadata = _creatureMetadataReader.Read(xml, path, item.ResourceName, item.ResourceRoot);
@@ -187,9 +198,16 @@ public sealed class RepackerService
                 errors.AddRange(source.Messages.Where(message => message.Severity == ValidationSeverity.Error).Select(message => $"{path}: {message.Message}"));
                 sources.Add(source);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
-                errors.Add($"{path}: {ex.Message}");
+                if (IsExplicitYmtPath(path) || (xml is not null && IsSupportedClothingRoot(xml)))
+                {
+                    errors.Add($"{path}: {ex.Message}");
+                }
             }
             finally
             {
@@ -262,7 +280,6 @@ public sealed class RepackerService
                     .ToList(),
                 builder.GetComponentCounts(),
                 builder.GetPropCounts()));
-
             progress?.Report(new OperationProgress(
                 "analyze",
                 "build-plan",
@@ -332,6 +349,7 @@ public sealed class RepackerService
         var sourceAlternateMetadataBackups = alternateMetadata.Select(metadata => new SourceAlternateMetadataBackupPlan(
             metadata.Path,
             Path.Combine(metadata.ResourceName, Path.GetRelativePath(metadata.ResourceRoot, metadata.Path)).Replace(Path.DirectorySeparatorChar, '/'))).ToList();
+        var sourceFiles = BuildSourceFingerprints(scanItems, sources, creatureMetadata, brokenCreatureMetadata, alternateMetadata, streamRenames, errors);
 
         progress?.Report(new OperationProgress(
             "analyze",
@@ -368,6 +386,7 @@ public sealed class RepackerService
             CreatureMetadataOutputs = creatureMetadataOutputs,
             SourceAlternateMetadata = sourceAlternateMetadataSummaries,
             AlternateMetadataOutputs = alternateMetadataOutputs,
+            SourceFiles = sourceFiles,
             SourceAlternateMetadataBackups = sourceAlternateMetadataBackups,
             Warnings = warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             Errors = errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
@@ -378,17 +397,29 @@ public sealed class RepackerService
 
     public async Task SavePlanAsync(MergePlan plan, string outputPath, CancellationToken cancellationToken = default)
     {
-        await using var stream = File.Create(outputPath);
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            throw new InvalidOperationException("Plan output path is required.");
+        }
+
+        var fullOutputPath = Path.GetFullPath(outputPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullOutputPath)!);
+        await using var stream = File.Create(fullOutputPath);
         await JsonSerializer.SerializeAsync(stream, plan, _jsonOptions, cancellationToken);
     }
 
     public async Task<MergePlan> LoadPlanAsync(string planPath, CancellationToken cancellationToken = default)
     {
         await using var stream = File.OpenRead(planPath);
-        return (await JsonSerializer.DeserializeAsync<MergePlan>(stream, _jsonOptions, cancellationToken))
+        var plan = await JsonSerializer.DeserializeAsync<MergePlan>(stream, _jsonOptions, cancellationToken)
             ?? throw new InvalidDataException($"Could not read plan {planPath}.");
-    }
+        if (plan.SchemaVersion != 2)
+        {
+            throw new InvalidDataException($"Unsupported plan schema version {plan.SchemaVersion}; rerun Analyze to create a current plan.");
+        }
 
+        return plan;
+    }
     public async Task<BuildResult> BuildAsync(MergePlan plan, string outputRoot, BuildOptions? options = null, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         options ??= new BuildOptions();
@@ -400,17 +431,26 @@ public sealed class RepackerService
 
         var fullOutputRoot = Path.GetFullPath(outputRoot);
         ValidateGeneratedResourcesRoot(GetKnownResourceRoots(plan), fullOutputRoot, GeneratedResourcesRootUsage.GeneratedOnly);
+        ValidateBuildOutputRoot(plan, fullOutputRoot);
+        ValidateCurrentFingerprints(plan);
 
-        var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
-        var creatureMetadataByPath = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
-        var alternateMetadataByPath = ReloadAlternateMetadataForPlan(plan, cancellationToken);
-        var sourceShopMetadata = LoadSourceShopMetadataIndex(plan, cancellationToken);
-        var creatureMetadataOutputs = GetCreatureMetadataOutputPlans(plan);
-        var creatureMetadataOutputByTarget = creatureMetadataOutputs
-            .SelectMany(output => output.TargetCollections.Select(collection => new { collection, output }))
-            .ToDictionary(item => item.collection, item => item.output, StringComparer.OrdinalIgnoreCase);
-        var writtenFiles = new List<string>();
-        Directory.CreateDirectory(fullOutputRoot);
+        var finalOutputRoot = fullOutputRoot;
+        var stagingRoot = CreateStagingRoot(
+            "build",
+            Directory.GetParent(fullOutputRoot)?.FullName ?? Path.GetPathRoot(fullOutputRoot));
+        fullOutputRoot = Path.Combine(stagingRoot, "content");
+        try
+        {
+            var sources = await ReloadSourcesForPlanAsync(plan, progress, cancellationToken);
+            var creatureMetadataByPath = await ReloadCreatureMetadataForPlanAsync(plan, cancellationToken);
+            var alternateMetadataByPath = ReloadAlternateMetadataForPlan(plan, cancellationToken);
+            var sourceShopMetadata = LoadSourceShopMetadataIndex(plan, cancellationToken);
+            var mappingIndex = MappingIndex.Create(plan.DrawableMappings, plan.PropMappings);
+            var creatureMetadataOutputs = plan.CreatureMetadataOutputs;
+            var creatureMetadataOutputByTarget = creatureMetadataOutputs
+                .SelectMany(output => output.TargetCollections.Select(collection => new { collection, output }))
+                .ToDictionary(item => item.collection, item => item.output, StringComparer.OrdinalIgnoreCase);
+            var writtenFiles = new List<string>();
 
         progress?.Report(new OperationProgress(
             "build",
@@ -422,8 +462,7 @@ public sealed class RepackerService
         for (var index = 0; index < plan.TargetCollections.Count; index++)
         {
             var targetPlan = plan.TargetCollections[index];
-            var relativeYmtPath = targetPlan.OutputYmtPath.Replace('/', Path.DirectorySeparatorChar);
-            var ymtOutputPath = Path.Combine(fullOutputRoot, relativeYmtPath);
+            var ymtOutputPath = SafePath.ResolveInsideRoot(fullOutputRoot, targetPlan.OutputYmtPath);
             progress?.Report(new OperationProgress(
                 "build",
                 "build-target",
@@ -450,7 +489,8 @@ public sealed class RepackerService
                     xml,
                     ymtOutputPath,
                     $"Failed to encode target collection '{targetPlan.FullCollectionName}'",
-                    cancellationToken);
+                    cancellationToken,
+                    SafePath.ResolveInsideRoot(finalOutputRoot, targetPlan.OutputYmtPath));
                 writtenFiles.Add(ymtOutputPath);
 
                 if (options.IncludeYmtXml)
@@ -461,16 +501,15 @@ public sealed class RepackerService
                 }
 
                 creatureMetadataOutputByTarget.TryGetValue(targetPlan.CollectionName, out var creatureMetadataOutput);
-
-                var metaPath = Path.Combine(fullOutputRoot, plan.TargetResource, "data", $"{targetPlan.FullCollectionName}.meta");
+                var metaPath = SafePath.ResolveInsideRoot(fullOutputRoot, $"{plan.TargetResource}/data/{targetPlan.FullCollectionName}.meta");
                 Directory.CreateDirectory(Path.GetDirectoryName(metaPath)!);
-                BuildShopMeta(targetPlan, xml, sourceShopMetadata, plan.DrawableMappings, plan.PropMappings, creatureMetadataOutput?.Name).Save(metaPath);
+                BuildShopMeta(targetPlan, xml, sourceShopMetadata, mappingIndex, creatureMetadataOutput?.Name).Save(metaPath);
                 writtenFiles.Add(metaPath);
             }
             catch (Exception ex) when (IsContextWrappable(ex))
             {
                 throw CreateContextException(
-                    $"Failed while building target collection '{targetPlan.FullCollectionName}' for output '{ymtOutputPath}'",
+                    $"Failed while building target collection '{targetPlan.FullCollectionName}' for output '{SafePath.ResolveInsideRoot(finalOutputRoot, targetPlan.OutputYmtPath)}'",
                     ex);
             }
 
@@ -489,7 +528,7 @@ public sealed class RepackerService
         for (var index = 0; index < creatureMetadataOutputs.Count; index++)
         {
             var creatureMetadataOutput = creatureMetadataOutputs[index];
-            var creatureMetadataOutputPath = Path.Combine(fullOutputRoot, creatureMetadataOutput.OutputYmtPath.Replace('/', Path.DirectorySeparatorChar));
+            var creatureMetadataOutputPath = SafePath.ResolveInsideRoot(fullOutputRoot, creatureMetadataOutput.OutputYmtPath);
             progress?.Report(new OperationProgress(
                 "build",
                 "build-creature-metadata",
@@ -503,14 +542,14 @@ public sealed class RepackerService
 
             try
             {
-                var creatureMetadataXml = BuildCreatureMetadataXml(plan, creatureMetadataOutput, targetPlansByCollection, sources, creatureMetadataByPath);
+                var creatureMetadataXml = BuildCreatureMetadataXml(creatureMetadataOutput, targetPlansByCollection, sources, creatureMetadataByPath, mappingIndex);
                 Directory.CreateDirectory(Path.GetDirectoryName(creatureMetadataOutputPath)!);
                 await EncodeYmtWithDiagnosticsAsync(
                     creatureMetadataXml,
                     creatureMetadataOutputPath,
                     $"Failed to encode creature metadata '{creatureMetadataOutput.Name}'",
-                    cancellationToken);
-                writtenFiles.Add(creatureMetadataOutputPath);
+                    cancellationToken,
+                    SafePath.ResolveInsideRoot(finalOutputRoot, creatureMetadataOutput.OutputYmtPath));
 
                 if (options.IncludeYmtXml)
                 {
@@ -529,7 +568,7 @@ public sealed class RepackerService
 
         foreach (var alternateMetadataOutput in plan.AlternateMetadataOutputs)
         {
-            var outputPath = Path.Combine(fullOutputRoot, alternateMetadataOutput.OutputPath.Replace('/', Path.DirectorySeparatorChar));
+            var outputPath = SafePath.ResolveInsideRoot(fullOutputRoot, alternateMetadataOutput.OutputPath);
             try
             {
                 var alternateXmls = alternateMetadataOutput.SourcePaths
@@ -561,34 +600,56 @@ public sealed class RepackerService
 
         if (plan.TargetCollections.Count > 0)
         {
-            var fxmanifestPath = Path.Combine(fullOutputRoot, plan.TargetResource, "fxmanifest.lua");
+            var fxmanifestPath = SafePath.ResolveInsideRoot(fullOutputRoot, $"{plan.TargetResource}/fxmanifest.lua");
             Directory.CreateDirectory(Path.GetDirectoryName(fxmanifestPath)!);
             await File.WriteAllTextAsync(fxmanifestPath, BuildFxManifest(plan, options), cancellationToken);
             writtenFiles.Add(fxmanifestPath);
 
             if (options.IncludeDebugClient)
             {
-                var validationPath = Path.Combine(fullOutputRoot, plan.TargetResource, "client", "validate_collections.lua");
+                var validationPath = SafePath.ResolveInsideRoot(fullOutputRoot, $"{plan.TargetResource}/client/validate_collections.lua");
                 Directory.CreateDirectory(Path.GetDirectoryName(validationPath)!);
                 await File.WriteAllTextAsync(validationPath, BuildValidationLua(plan), cancellationToken);
                 writtenFiles.Add(validationPath);
             }
         }
+            cancellationToken.ThrowIfCancellationRequested();
 
-        progress?.Report(new OperationProgress(
-            "build",
-            "complete",
-            plan.TargetCollections.Count,
-            plan.TargetCollections.Count,
-            Message: "Build complete.",
-            SourceCount: sources.Count,
-            TargetCount: plan.TargetCollections.Count,
-            WrittenFileCount: writtenFiles.Count));
+            var stagedTargetRoot = SafePath.ResolveInsideRoot(fullOutputRoot, plan.TargetResource, allowRoot: true);
+            var finalTargetRoot = SafePath.ResolveInsideRoot(finalOutputRoot, plan.TargetResource, allowRoot: true);
+            if (Directory.Exists(stagedTargetRoot))
+            {
+                WriteOwnershipMarker(stagedTargetRoot);
+                ReplaceOwnedDirectory(stagedTargetRoot, finalTargetRoot);
+            }
+            else if (Directory.Exists(finalTargetRoot))
+            {
+                EnsureOwnedDirectory(finalTargetRoot);
+                Directory.Delete(finalTargetRoot, recursive: true);
+            }
 
-        return new BuildResult(fullOutputRoot, writtenFiles);
+            var finalWrittenFiles = writtenFiles
+                .Select(path => Path.Combine(finalOutputRoot, Path.GetRelativePath(fullOutputRoot, path)))
+                .ToList();
+            progress?.Report(new OperationProgress(
+                "build",
+                "complete",
+                plan.TargetCollections.Count,
+                plan.TargetCollections.Count,
+                Message: "Build complete.",
+                SourceCount: sources.Count,
+                TargetCount: plan.TargetCollections.Count,
+                WrittenFileCount: finalWrittenFiles.Count));
+
+            return new BuildResult(finalOutputRoot, finalWrittenFiles);
+        }
+        finally
+        {
+            DeleteStagingRoot(stagingRoot);
+        }
     }
 
-    private async Task EncodeYmtWithDiagnosticsAsync(XDocument xml, string outputYmtPath, string context, CancellationToken cancellationToken)
+    private async Task EncodeYmtWithDiagnosticsAsync(XDocument xml, string outputYmtPath, string context, CancellationToken cancellationToken, string? diagnosticOutputYmtPath = null)
     {
         try
         {
@@ -596,12 +657,13 @@ public sealed class RepackerService
         }
         catch (Exception ex) when (IsContextWrappable(ex))
         {
-            var diagnosticXmlPath = TrySaveFailedXml(xml, outputYmtPath);
+            var displayPath = diagnosticOutputYmtPath ?? outputYmtPath;
+            var diagnosticXmlPath = TrySaveFailedXml(xml, displayPath);
             var diagnosticMessage = diagnosticXmlPath is null
                 ? string.Empty
                 : $" Diagnostic XML was written to '{diagnosticXmlPath}'.";
 
-            throw CreateContextException($"{context}. Output YMT: '{outputYmtPath}'.{diagnosticMessage}", ex);
+            throw CreateContextException($"{context}. Output YMT: '{displayPath}'.{diagnosticMessage}", ex);
         }
     }
 
@@ -708,6 +770,25 @@ public sealed class RepackerService
     public async Task<IReadOnlyList<BackupEntry>> ApplyAsync(MergePlan plan, string backupRoot, ApplyOptions options, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         options ??= new ApplyOptions();
+        var validationErrors = _planValidator.Validate(plan);
+        if (validationErrors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(Environment.NewLine, validationErrors));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var knownRoots = GetKnownResourceRoots(plan);
+        var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
+        ValidateGeneratedResourcesRoot(
+            knownRoots,
+            generatedResourcesRoot,
+            options.CopyResourcesToOutputBeforeRename
+                ? GeneratedResourcesRootUsage.CopySourceResources
+                : GeneratedResourcesRootUsage.GeneratedOnly);
+        ValidateApplyRoots(plan, Path.GetFullPath(backupRoot), generatedResourcesRoot);
+        ValidateApplyDestinations(plan, generatedResourcesRoot, resourceRootsToCopy: options.CopyResourcesToOutputBeforeRename ? GetResourceRootsForCopy(plan) : []);
+        ValidateCurrentFingerprints(plan);
+
         var mergedSourceYmtPaths = plan.TargetCollections
             .SelectMany(target => target.SourceYmts)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -715,16 +796,8 @@ public sealed class RepackerService
         var resourceRootsToCopy = options.CopyResourcesToOutputBeforeRename
             ? GetResourceRootsForCopy(plan)
             : [];
-        var generatedResourcesRoot = GetGeneratedResourcesRoot(plan);
         var sourceAlternateMetadataBackups = GetSourceAlternateMetadataBackupPlans(plan);
         var sourceBackupPlanCount = mergedSourceYmtPaths.Count + plan.BrokenCreatureMetadataBackups.Count + sourceAlternateMetadataBackups.Count;
-        ValidateGeneratedResourcesRoot(
-            GetKnownResourceRoots(plan),
-            generatedResourcesRoot,
-            options.CopyResourcesToOutputBeforeRename
-                ? GeneratedResourcesRootUsage.CopySourceResources
-                : GeneratedResourcesRootUsage.GeneratedOnly);
-
         progress?.Report(new OperationProgress(
             "apply",
             "start",
@@ -733,263 +806,270 @@ public sealed class RepackerService
                 ? $"Preparing to copy {resourceRootsToCopy.Count} source resources, then apply {plan.StreamRenames.Count} stream renames to the output copy."
                 : $"Preparing to apply {plan.StreamRenames.Count} stream renames and {sourceBackupPlanCount} source backups."));
 
-        var validationErrors = _planValidator.Validate(plan);
-        if (validationErrors.Count > 0)
-        {
-            throw new InvalidOperationException(string.Join(Environment.NewLine, validationErrors));
-        }
-
-        var runId = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHHmmssZ");
-        var backupDir = Path.Combine(Path.GetFullPath(backupRoot), runId);
-        Directory.CreateDirectory(backupDir);
+        var (backupDir, runId) = CreateBackupRunDirectory(Path.GetFullPath(backupRoot));
         var manifestPath = Path.Combine(backupDir, "backup-manifest.json");
-        var entries = new List<BackupEntry>();
-        await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-
-        var stagingRoot = Path.Combine(Path.GetTempPath(), $"clothing-repacker-{Guid.NewGuid():N}");
-        progress?.Report(new OperationProgress(
-            "apply",
-            "build-staging",
-            Message: "Building generated resource into a staging folder."));
-        var buildResult = await BuildAsync(plan, stagingRoot, new BuildOptions
+        var manifest = new BackupManifest
         {
-            IncludeYmtXml = options.IncludeYmtXml,
-            IncludeDebugClient = options.IncludeDebugClient,
-        }, progress, cancellationToken);
-        var renameMap = options.CopyResourcesToOutputBeforeRename
-            ? plan.StreamRenames.ToDictionary(rename => rename.SourcePath, rename => rename.TargetPath, StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var pathMap = options.CopyResourcesToOutputBeforeRename
-            ? CopySourceResourcesToOutput(resourceRootsToCopy, generatedResourcesRoot, entries, progress, cancellationToken, renameMap)
-            : new ResourcePathMap([]);
-
-        if (options.CopyResourcesToOutputBeforeRename)
+            RunId = runId,
+            BackupRoot = Path.GetFullPath(backupRoot),
+            SourceRoots = knownRoots.ToList(),
+            GeneratedResourcesRoot = generatedResourcesRoot,
+        };
+        var entries = manifest.Entries;
+        var stagingRoot = CreateStagingRoot("apply");
+        try
         {
-            foreach (var sourceRoot in resourceRootsToCopy)
-            {
-                var copiedRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
-                SanitizeResourceManifest(copiedRoot, entries: null, backupManifestRoot: null);
-            }
-        }
-        else
-        {
-            foreach (var sourceRoot in GetKnownResourceRoots(plan))
-            {
-                SanitizeResourceManifest(sourceRoot, entries, backupDir);
-                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-            }
-        }
-
-        for (var index = 0; index < plan.StreamRenames.Count; index++)
-        {
-            var rename = plan.StreamRenames[index];
-            var sourcePath = pathMap.Map(rename.SourcePath);
-            var targetPath = pathMap.Map(rename.TargetPath);
-
-            if (options.CopyResourcesToOutputBeforeRename && File.Exists(targetPath))
-            {
-                var copyBeforeHash = ComputeSha256(targetPath);
-                entries.Add(new BackupEntry("stream-rename", sourcePath, null, targetPath, copyBeforeHash, ComputeSha256(targetPath), DateTimeOffset.UtcNow));
-
-                progress?.Report(new OperationProgress(
-                    "apply",
-                    "rename-stream",
-                    index + 1,
-                    plan.StreamRenames.Count,
-                    targetPath,
-                    RenameCount: index + 1,
-                    BackupCount: entries.Count(IsSourceBackupEntry)));
-                continue;
-            }
-
-            if (!File.Exists(sourcePath))
-            {
-                throw new FileNotFoundException($"Source file missing at apply time: {sourcePath}");
-            }
-
-            var beforeHash = ComputeSha256(sourcePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-            var renameEntry = new BackupEntry("stream-rename", sourcePath, null, targetPath, beforeHash, null, DateTimeOffset.UtcNow);
-            entries.Add(renameEntry);
-            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-            File.Move(sourcePath, targetPath);
-            entries[^1] = renameEntry with { Sha256After = ComputeSha256(targetPath) };
-            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-
+            await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
             progress?.Report(new OperationProgress(
                 "apply",
-                "rename-stream",
-                index + 1,
-                plan.StreamRenames.Count,
-                targetPath,
-                RenameCount: index + 1,
-                BackupCount: entries.Count(IsSourceBackupEntry)));
-        }
-
-        var mergedSources = plan.SourceYmts
-            .Where(source => mergedSourceYmtPaths.Contains(source.Path))
-            .ToList();
-
-        for (var index = 0; index < mergedSources.Count; index++)
-        {
-            var source = mergedSources[index];
-            var sourcePath = pathMap.Map(source.Path);
-            if (!File.Exists(sourcePath))
+                "build-staging",
+                Message: "Building generated resource into a staging folder."));
+            var buildResult = await BuildAsync(plan, stagingRoot, new BuildOptions
             {
-                continue;
-            }
+                IncludeYmtXml = options.IncludeYmtXml,
+                IncludeDebugClient = options.IncludeDebugClient,
+            }, progress, cancellationToken);
 
-            if (pathMap.HasMappings)
+            var pathMap = new ResourcePathMap([]);
+            if (options.CopyResourcesToOutputBeforeRename)
             {
-                File.Delete(sourcePath);
-            }
-            else
-            {
-                var backupPath = Path.Combine(backupDir, source.Resource, Path.GetFileName(source.Path));
-                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-                File.Copy(sourcePath, backupPath, overwrite: true);
-                var beforeHash = ComputeSha256(sourcePath);
-                entries.Add(new BackupEntry("old-ymt", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
-                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-                File.Delete(sourcePath);
-            }
-
-            progress?.Report(new OperationProgress(
-                "apply",
-                pathMap.HasMappings ? "remove-source-ymt" : "backup-source-ymt",
-                index + 1,
-                mergedSources.Count,
-                sourcePath,
-                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(IsSourceBackupEntry),
-                RemovedCount: pathMap.HasMappings ? index + 1 : 0));
-        }
-
-        for (var index = 0; index < plan.BrokenCreatureMetadataBackups.Count; index++)
-        {
-            var source = plan.BrokenCreatureMetadataBackups[index];
-            var sourcePath = pathMap.Map(source.SourcePath);
-            if (!File.Exists(sourcePath))
-            {
-                continue;
-            }
-
-            var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-            File.Copy(sourcePath, backupPath, overwrite: true);
-            var beforeHash = ComputeSha256(sourcePath);
-            entries.Add(new BackupEntry("broken-creature-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
-            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-            File.Delete(sourcePath);
-
-            progress?.Report(new OperationProgress(
-                "apply",
-                "backup-source-ymt",
-                mergedSources.Count + index + 1,
-                mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count,
-                sourcePath,
-                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(IsSourceBackupEntry)));
-        }
-
-        for (var index = 0; index < sourceAlternateMetadataBackups.Count; index++)
-        {
-            var source = sourceAlternateMetadataBackups[index];
-            var sourcePath = pathMap.Map(source.SourcePath);
-            if (!File.Exists(sourcePath))
-            {
-                continue;
-            }
-
-            if (pathMap.HasMappings)
-            {
-                File.Delete(sourcePath);
-            }
-            else
-            {
-                var backupPath = Path.Combine(backupDir, source.BackupPath.Replace('/', Path.DirectorySeparatorChar));
-                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-                File.Copy(sourcePath, backupPath, overwrite: true);
-                var beforeHash = ComputeSha256(sourcePath);
-                entries.Add(new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow));
-                await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-                File.Delete(sourcePath);
-            }
-
-            var metadataIndex = mergedSources.Count + plan.BrokenCreatureMetadataBackups.Count + index + 1;
-            progress?.Report(new OperationProgress(
-                "apply",
-                pathMap.HasMappings ? "remove-source-metadata" : "backup-source-metadata",
-                metadataIndex,
-                sourceBackupPlanCount,
-                sourcePath,
-                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-                BackupCount: entries.Count(IsSourceBackupEntry),
-                RemovedCount: pathMap.HasMappings ? metadataIndex : 0));
-        }
-
-        if (plan.TargetCollections.Count > 0)
-        {
-            var generatedRoot = Path.Combine(generatedResourcesRoot, plan.TargetResource);
-            var generatedRootIsCopiedSourceResource = resourceRootsToCopy.Any(resourceRoot =>
-                PathsEqual(GetResourceCopyDestination(resourceRoot, generatedResourcesRoot), generatedRoot));
-            entries.Add(new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, null, DateTimeOffset.UtcNow));
-            await WriteBackupManifestAsync(manifestPath, entries, cancellationToken);
-            if (Directory.Exists(generatedRoot))
-            {
-                if (generatedRootIsCopiedSourceResource)
+                var mappings = new List<ResourceRootMapping>();
+                foreach (var sourceRoot in resourceRootsToCopy)
                 {
-                    RemoveOverlayArtifacts(generatedRoot);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var destinationRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
+                    ValidateResourceCopyDestination(sourceRoot, destinationRoot);
+                    if (Directory.Exists(destinationRoot))
+                    {
+                        EnsureOwnedDirectory(destinationRoot);
+                    }
+
+                    var renameMap = plan.StreamRenames
+                        .Where(rename => SafePath.IsInside(rename.SourcePath, sourceRoot))
+                        .ToDictionary(
+                            rename => Path.GetRelativePath(sourceRoot, rename.SourcePath),
+                            rename => Path.GetRelativePath(sourceRoot, rename.TargetPath),
+                            StringComparer.OrdinalIgnoreCase);
+                    var stagedDestination = CreateStagingRoot("apply-copy", Path.GetDirectoryName(destinationRoot));
+                    try
+                    {
+                        CopyDirectory(sourceRoot, stagedDestination, progress, "apply", "copy-source-file", cancellationToken, renameMap);
+                        WriteOwnershipMarker(stagedDestination, runId);
+                        SanitizeResourceManifest(stagedDestination, plan);
+
+                        var ownershipHash = ComputeSha256(Path.Combine(stagedDestination, OwnershipMarkerFileName));
+                        var copyEntry = new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, ownershipHash, DateTimeOffset.UtcNow, "planned");
+                        entries.Add(copyEntry);
+                        await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                        ReplaceOwnedDirectory(stagedDestination, destinationRoot);
+                        entries[^1] = copyEntry with { State = "applied" };
+                        await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                        mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
+                    }
+                    finally
+                    {
+                        DeleteStagingRoot(stagedDestination);
+                    }
+                }
+
+                pathMap = new ResourcePathMap(mappings);
+            }
+            else
+            {
+                foreach (var sourceRoot in knownRoots)
+                {
+                    await SanitizeResourceManifestAsync(sourceRoot, plan, backupDir, manifestPath, manifest, cancellationToken);
+                }
+            }
+
+            for (var index = 0; index < plan.StreamRenames.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var rename = plan.StreamRenames[index];
+                var sourcePath = pathMap.Map(rename.SourcePath);
+                var targetPath = pathMap.Map(rename.TargetPath);
+                if (options.CopyResourcesToOutputBeforeRename && File.Exists(targetPath))
+                {
+                    var afterHash = ComputeSha256(targetPath);
+                    entries.Add(new BackupEntry("stream-rename", sourcePath, null, targetPath, afterHash, afterHash, DateTimeOffset.UtcNow, "applied"));
+                    await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                    continue;
+                }
+
+                if (!File.Exists(sourcePath))
+                {
+                    throw new FileNotFoundException($"Source file missing at apply time: {sourcePath}");
+                }
+
+                var beforeHash = ComputeSha256(sourcePath);
+                var renameEntry = new BackupEntry("stream-rename", sourcePath, null, targetPath, beforeHash, null, DateTimeOffset.UtcNow, "planned");
+                entries.Add(renameEntry);
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                if (File.Exists(targetPath))
+                {
+                    throw new IOException($"Refusing to overwrite existing stream destination: {targetPath}");
+                }
+
+                File.Move(sourcePath, targetPath);
+                entries[^1] = renameEntry with { Sha256After = ComputeSha256(targetPath), State = "applied" };
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+            }
+
+            var mergedSources = plan.SourceYmts
+                .Where(source => mergedSourceYmtPaths.Contains(source.Path))
+                .ToList();
+            for (var index = 0; index < mergedSources.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var source = mergedSources[index];
+                var sourcePath = pathMap.Map(source.Path);
+                if (!File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                if (pathMap.HasMappings)
+                {
+                    File.Delete(sourcePath);
                 }
                 else
                 {
-                    Directory.Delete(generatedRoot, recursive: true);
+                    var sourceRoot = GetResourceRoot(plan, source.Resource);
+                    var backupPath = GetBackupDestination(backupDir, sourceRoot, sourcePath);
+                    var beforeHash = ComputeSha256(sourcePath);
+                    Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                    File.Copy(sourcePath, backupPath, overwrite: false);
+                    var backupEntry = new BackupEntry("old-ymt", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow, "planned");
+                    entries.Add(backupEntry);
+                    await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                    File.Delete(sourcePath);
+                    entries[^1] = backupEntry with { State = "applied" };
+                    await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
                 }
             }
 
-            CopyDirectory(
-                Path.Combine(buildResult.OutputRoot, plan.TargetResource),
-                generatedRoot,
-                progress,
+            foreach (var source in plan.BrokenCreatureMetadataBackups)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sourcePath = pathMap.Map(source.SourcePath);
+                if (!File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                if (pathMap.HasMappings)
+                {
+                    File.Delete(sourcePath);
+                    continue;
+                }
+
+                var sourceRoot = GetResourceRootForPath(plan, source.SourcePath);
+                var backupPath = GetBackupDestination(backupDir, sourceRoot, sourcePath);
+                var beforeHash = ComputeSha256(sourcePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                File.Copy(sourcePath, backupPath, overwrite: false);
+                var backupEntry = new BackupEntry("broken-creature-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow, "planned");
+                entries.Add(backupEntry);
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                File.Delete(sourcePath);
+                entries[^1] = backupEntry with { State = "applied" };
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+            }
+
+            foreach (var source in sourceAlternateMetadataBackups)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var sourcePath = pathMap.Map(source.SourcePath);
+                if (!File.Exists(sourcePath))
+                {
+                    continue;
+                }
+
+                if (pathMap.HasMappings)
+                {
+                    File.Delete(sourcePath);
+                    continue;
+                }
+
+                var sourceRoot = GetResourceRootForPath(plan, source.SourcePath);
+                var backupPath = GetBackupDestination(backupDir, sourceRoot, sourcePath);
+                var beforeHash = ComputeSha256(sourcePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                File.Copy(sourcePath, backupPath, overwrite: false);
+                var backupEntry = new BackupEntry("source-alternate-metadata", sourcePath, backupPath, null, beforeHash, ComputeSha256(backupPath), DateTimeOffset.UtcNow, "planned");
+                entries.Add(backupEntry);
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                File.Delete(sourcePath);
+                entries[^1] = backupEntry with { State = "applied" };
+                await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+            }
+
+            if (plan.TargetCollections.Count > 0)
+            {
+                var generatedRoot = SafePath.ResolveInsideRoot(generatedResourcesRoot, plan.TargetResource);
+                var generatedRootIsCopiedSourceResource = resourceRootsToCopy.Any(resourceRoot =>
+                    SafePath.PathsEqual(GetResourceCopyDestination(resourceRoot, generatedResourcesRoot), generatedRoot));
+                if (Directory.Exists(generatedRoot))
+                {
+                    EnsureOwnedDirectory(generatedRoot);
+                }
+
+                var stagedReplacement = CreateStagingRoot("apply-generated", Path.GetDirectoryName(generatedRoot));
+                try
+                {
+                    if (generatedRootIsCopiedSourceResource && Directory.Exists(generatedRoot))
+                    {
+                        CopyDirectory(generatedRoot, stagedReplacement, cancellationToken: cancellationToken);
+                        RemoveOverlayArtifacts(stagedReplacement);
+                    }
+
+                    var stagedGeneratedTarget = SafePath.ResolveInsideRoot(buildResult.OutputRoot, plan.TargetResource);
+                    CopyDirectory(stagedGeneratedTarget, stagedReplacement, progress, "apply", "copy-generated-file", cancellationToken);
+                    WriteOwnershipMarker(stagedReplacement, runId);
+
+                    var ownershipHash = ComputeSha256(Path.Combine(stagedReplacement, OwnershipMarkerFileName));
+                    var generatedEntry = new BackupEntry("generated-resource", generatedRoot, null, generatedRoot, string.Empty, ownershipHash, DateTimeOffset.UtcNow, "planned");
+                    entries.Add(generatedEntry);
+                    await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                    ReplaceOwnedDirectory(stagedReplacement, generatedRoot);
+                    entries[^1] = generatedEntry with { State = "applied" };
+                    await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+                }
+                finally
+                {
+                    DeleteStagingRoot(stagedReplacement);
+                }
+            }
+
+            RecordGeneratedFileEntries(manifest, cancellationToken);
+            manifest.Completed = true;
+            await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+            progress?.Report(new OperationProgress(
                 "apply",
-                "copy-generated-file",
-                cancellationToken);
+                "complete",
+                plan.StreamRenames.Count + sourceBackupPlanCount,
+                plan.StreamRenames.Count + sourceBackupPlanCount,
+                Message: $"Apply complete. Backup manifest written to {manifestPath}.",
+                RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
+                BackupCount: entries.Count(IsSourceBackupEntry),
+                WrittenFileCount: buildResult.WrittenFiles.Count));
+            return entries.ToList();
         }
-
-        progress?.Report(new OperationProgress(
-            "apply",
-            "copy-generated-resource",
-            Message: plan.TargetCollections.Count > 0
-                ? $"Copied generated resource to {Path.Combine(generatedResourcesRoot, plan.TargetResource)}."
-                : "No merged freemode resource was generated.",
-            RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(IsSourceBackupEntry),
-            WrittenFileCount: buildResult.WrittenFiles.Count));
-
-        progress?.Report(new OperationProgress(
-            "apply",
-            "complete",
-            plan.StreamRenames.Count + sourceBackupPlanCount,
-            plan.StreamRenames.Count + sourceBackupPlanCount,
-            Message: $"Apply complete. Backup manifest written to {manifestPath}.",
-            RenameCount: entries.Count(entry => entry.Kind == "stream-rename"),
-            BackupCount: entries.Count(IsSourceBackupEntry),
-            WrittenFileCount: buildResult.WrittenFiles.Count));
-
-        return entries;
+        finally
+        {
+            DeleteStagingRoot(stagingRoot);
+        }
     }
 
-    private async Task WriteBackupManifestAsync(
-        string manifestPath,
-        IReadOnlyList<BackupEntry> entries,
-        CancellationToken cancellationToken)
+    private async Task WriteBackupManifestAsync(string manifestPath, BackupManifest manifest, CancellationToken cancellationToken)
     {
         var temporaryPath = $"{manifestPath}.{Guid.NewGuid():N}.tmp";
         try
         {
             await File.WriteAllTextAsync(
                 temporaryPath,
-                JsonSerializer.Serialize(entries, _jsonOptions),
+                JsonSerializer.Serialize(manifest, _jsonOptions),
                 cancellationToken);
             File.Move(temporaryPath, manifestPath, overwrite: true);
         }
@@ -1003,9 +1083,124 @@ public sealed class RepackerService
     }
 
     private static string GetGeneratedResourcesRoot(MergePlan plan)
-        => !string.IsNullOrWhiteSpace(plan.GeneratedResourcesRoot)
-            ? Path.GetFullPath(plan.GeneratedResourcesRoot)
-            : Path.GetDirectoryName(plan.ResourcesRoot) ?? plan.ResourcesRoot;
+        => Path.GetFullPath(plan.GeneratedResourcesRoot);
+
+    private static void ValidateApplyDestinations(MergePlan plan, string generatedResourcesRoot, IReadOnlyList<string> resourceRootsToCopy)
+    {
+        if (plan.TargetCollections.Count > 0)
+        {
+            var generatedTarget = SafePath.ResolveInsideRoot(generatedResourcesRoot, plan.TargetResource);
+            if (Directory.Exists(generatedTarget))
+            {
+                EnsureOwnedDirectory(generatedTarget);
+            }
+        }
+
+        foreach (var sourceRoot in resourceRootsToCopy)
+        {
+            var destinationRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
+            if (Directory.Exists(destinationRoot))
+            {
+                EnsureOwnedDirectory(destinationRoot);
+            }
+        }
+
+        foreach (var rename in plan.StreamRenames)
+        {
+            if (!resourceRootsToCopy.Any(root => SafePath.IsInside(rename.SourcePath, root))
+                && File.Exists(rename.TargetPath)
+                && !SafePath.PathsEqual(rename.SourcePath, rename.TargetPath))
+            {
+                throw new InvalidOperationException($"Refusing to overwrite existing stream destination: {rename.TargetPath}");
+            }
+        }
+    }
+    private static void ValidateBuildOutputRoot(MergePlan plan, string outputRoot)
+    {
+        var plannedGeneratedTarget = SafePath.ResolveInsideRoot(plan.GeneratedResourcesRoot, plan.TargetResource);
+        if (SafePath.IsInside(outputRoot, plannedGeneratedTarget) || SafePath.PathsEqual(outputRoot, plannedGeneratedTarget))
+        {
+            throw new InvalidOperationException($"Build output root must be outside the generated target: {outputRoot}");
+        }
+
+        var outputTarget = SafePath.ResolveInsideRoot(outputRoot, plan.TargetResource);
+        foreach (var sourceRoot in GetKnownResourceRoots(plan))
+        {
+            if (SafePath.IsInside(outputTarget, sourceRoot)
+                || SafePath.IsInside(sourceRoot, outputTarget)
+                || SafePath.PathsEqual(outputTarget, sourceRoot))
+            {
+                throw new InvalidOperationException($"Build target must not overlap a selected source root: {outputTarget}");
+            }
+        }
+    }
+
+    private static void ValidateApplyRoots(MergePlan plan, string backupRoot, string generatedResourcesRoot)
+    {
+        foreach (var sourceRoot in GetKnownResourceRoots(plan))
+        {
+            if (SafePath.IsInside(backupRoot, sourceRoot)
+                || SafePath.IsInside(sourceRoot, backupRoot)
+                || SafePath.PathsEqual(backupRoot, sourceRoot))
+            {
+                throw new InvalidOperationException($"Backup root must be outside selected source roots: {backupRoot}");
+            }
+        }
+
+        var generatedTarget = SafePath.ResolveInsideRoot(generatedResourcesRoot, plan.TargetResource);
+        if (SafePath.IsInside(backupRoot, generatedTarget)
+            || SafePath.IsInside(generatedTarget, backupRoot)
+            || SafePath.PathsEqual(backupRoot, generatedTarget))
+        {
+            throw new InvalidOperationException($"Backup root must be outside the generated target: {backupRoot}");
+        }
+    }
+
+    private static (string Path, string RunId) CreateBackupRunDirectory(string backupRoot)
+    {
+        Directory.CreateDirectory(backupRoot);
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            var runId = $"{DateTimeOffset.UtcNow:yyyy-MM-ddTHHmmssZ}-{Guid.NewGuid():N}";
+            var path = Path.Combine(backupRoot, runId);
+            try
+            {
+                Directory.CreateDirectory(path);
+                using (new FileStream(Path.Combine(path, ".run-lock"), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                }
+
+                File.Delete(Path.Combine(path, ".run-lock"));
+                return (path, runId);
+            }
+            catch (IOException) when (attempt < 19)
+            {
+                // A colliding candidate is never removed; try another random suffix.
+            }
+        }
+
+        throw new IOException($"Could not create a unique backup run directory under {backupRoot}.");
+    }
+
+    private static string GetResourceRoot(MergePlan plan, string resourceName)
+        => GetKnownResourceRoots(plan).FirstOrDefault(root =>
+               Path.GetFileName(SafePath.Normalize(root)).Equals(resourceName, StringComparison.OrdinalIgnoreCase))
+           ?? throw new InvalidOperationException($"Resource root is not present in the plan: {resourceName}");
+
+    private static string GetResourceRootForPath(MergePlan plan, string path)
+        => GetKnownResourceRoots(plan).FirstOrDefault(root => SafePath.IsInside(path, root))
+           ?? throw new InvalidOperationException($"Source path is not contained by a selected resource root: {path}");
+
+    private static string GetBackupDestination(string backupDir, string resourceRoot, string sourcePath)
+    {
+        var relativePath = Path.GetRelativePath(resourceRoot, sourcePath);
+        if (relativePath.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidOperationException($"Source path is outside its resource root: {sourcePath}");
+        }
+
+        return SafePath.ResolveInsideRoot(backupDir, Path.Combine(Path.GetFileName(SafePath.Normalize(resourceRoot)), relativePath));
+    }
 
     private static void RemoveOverlayArtifacts(string root)
     {
@@ -1021,7 +1216,6 @@ public sealed class RepackerService
             File.Delete(file);
         }
     }
-
     private static bool IsOverlayArtifact(string path)
     {
         var extension = Path.GetExtension(path);
@@ -1031,158 +1225,179 @@ public sealed class RepackerService
     }
 
     private static IReadOnlyList<SourceAlternateMetadataBackupPlan> GetSourceAlternateMetadataBackupPlans(MergePlan plan)
-    {
-        if (plan.SourceAlternateMetadataBackups.Count > 0)
-        {
-            return plan.SourceAlternateMetadataBackups;
-        }
-
-        return plan.SourceAlternateMetadata
-            .Select(source => new SourceAlternateMetadataBackupPlan(
-                source.Path,
-                Path.Combine(source.Resource, Path.GetFileName(source.Path)).Replace(Path.DirectorySeparatorChar, '/')))
-            .DistinctBy(source => source.SourcePath, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
+        => plan.SourceAlternateMetadataBackups;
 
     private static bool IsSourceBackupEntry(BackupEntry entry)
         => entry.Kind is "old-ymt" or "broken-creature-metadata" or "source-alternate-metadata" or "resource-manifest";
 
-    private static ResourcePathMap CopySourceResourcesToOutput(
-        IReadOnlyList<string> resourceRoots,
-        string generatedResourcesRoot,
-        List<BackupEntry> entries,
-        IProgress<OperationProgress>? progress,
-        CancellationToken cancellationToken,
-        IReadOnlyDictionary<string, string>? renameMap = null)
+
+    private static void SanitizeResourceManifest(string resourceRoot, MergePlan plan)
     {
-        var mappings = new List<ResourceRootMapping>();
-        for (var index = 0; index < resourceRoots.Count; index++)
+        var mutation = GetManifestSanitization(resourceRoot, plan);
+        if (mutation is not null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var sourceRoot = NormalizePath(resourceRoots[index]);
-            var destinationRoot = GetResourceCopyDestination(sourceRoot, generatedResourcesRoot);
-            ValidateResourceCopyDestination(sourceRoot, destinationRoot);
-
-            progress?.Report(new OperationProgress(
-                "apply",
-                "copy-source-resource",
-                index,
-                resourceRoots.Count,
-                sourceRoot,
-                $"Copying source resource {index + 1}/{resourceRoots.Count}: {Path.GetFileName(NormalizePath(sourceRoot))}."));
-
-            if (Directory.Exists(destinationRoot))
-            {
-                Directory.Delete(destinationRoot, recursive: true);
-            }
-
-            CopyDirectory(sourceRoot, destinationRoot, progress, "apply", "copy-source-file", cancellationToken, renameMap);
-            mappings.Add(new ResourceRootMapping(sourceRoot, destinationRoot));
-            entries.Add(new BackupEntry("generated-resource", destinationRoot, null, destinationRoot, string.Empty, null, DateTimeOffset.UtcNow));
-
-            progress?.Report(new OperationProgress(
-                "apply",
-                "copy-source-resource",
-                index + 1,
-                resourceRoots.Count,
-                destinationRoot,
-                BackupCount: entries.Count(IsSourceBackupEntry)));
+            File.WriteAllText(mutation.Path, mutation.UpdatedText);
         }
-
-        return new ResourcePathMap(mappings);
     }
 
-    private static void SanitizeResourceManifest(string resourceRoot, List<BackupEntry>? entries = null, string? backupManifestRoot = null)
+    private async Task SanitizeResourceManifestAsync(
+        string resourceRoot,
+        MergePlan plan,
+        string backupDir,
+        string manifestPath,
+        BackupManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var mutation = GetManifestSanitization(resourceRoot, plan);
+        if (mutation is null)
+        {
+            return;
+        }
+
+        var beforeHash = ComputeSha256(mutation.Path);
+        var backupPath = GetBackupDestination(backupDir, resourceRoot, mutation.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+        File.Copy(mutation.Path, backupPath, overwrite: false);
+        if (!ComputeSha256(backupPath).Equals(beforeHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException($"Manifest backup hash mismatch: {backupPath}");
+        }
+
+        var afterHash = ComputeSha256Utf8(mutation.UpdatedText);
+        var entry = new BackupEntry(
+            "resource-manifest",
+            mutation.Path,
+            backupPath,
+            mutation.Path,
+            beforeHash,
+            afterHash,
+            DateTimeOffset.UtcNow,
+            "planned");
+        manifest.Entries.Add(entry);
+        await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+        File.WriteAllText(mutation.Path, mutation.UpdatedText);
+        if (!ComputeSha256(mutation.Path).Equals(afterHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException($"Manifest write hash mismatch: {mutation.Path}");
+        }
+
+        manifest.Entries[^1] = entry with { State = "applied" };
+        await WriteBackupManifestAsync(manifestPath, manifest, cancellationToken);
+    }
+
+    private static ManifestSanitization? GetManifestSanitization(string resourceRoot, MergePlan plan)
     {
         if (string.IsNullOrWhiteSpace(resourceRoot) || !Directory.Exists(resourceRoot))
         {
-            return;
+            return null;
         }
 
-        var manifestPath = FindResourceManifestPath(resourceRoot);
+        var manifestPath = ResourceManifestLocator.Find(resourceRoot);
         if (manifestPath is null)
         {
-            return;
+            return null;
         }
 
         var originalText = File.ReadAllText(manifestPath);
-        var updatedText = SanitizeManifestText(originalText);
-        if (string.Equals(originalText, updatedText, StringComparison.Ordinal))
-        {
-            return;
-        }
+        var migratedPaths = plan.SourceAlternateMetadata
+            .Select(metadata => metadata.Path)
+            .Concat(plan.SourceFiles
+                .Where(fingerprint => fingerprint.Kind.Equals("shop-metadata", StringComparison.OrdinalIgnoreCase))
+                .Select(fingerprint => fingerprint.Path)
+                .Where(IsShopPedApparelMetadataFile))
+            .Where(path => SafePath.IsInside(path, resourceRoot))
+            .Select(path => NormalizeManifestPath(Path.GetRelativePath(resourceRoot, path)))
+            .Concat(plan.SourceYmts
+                .Select(source => Path.GetFileName(source.Path))
+                .Select(name =>
+                {
+                    while (name.EndsWith(".xml", StringComparison.OrdinalIgnoreCase)
+                           || name.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase))
+                    {
+                        name = Path.GetFileNameWithoutExtension(name);
+                    }
 
-        var backupPath = backupManifestRoot is null
+                    return NormalizeManifestPath(name + ".meta");
+                }))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var updatedText = SanitizeManifestText(originalText, migratedPaths);
+        return string.Equals(originalText, updatedText, StringComparison.Ordinal)
             ? null
-            : Path.Combine(backupManifestRoot, Path.GetFileName(resourceRoot), Path.GetFileName(manifestPath));
-        if (backupPath is not null)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-            File.Copy(manifestPath, backupPath, overwrite: true);
-        }
+            : new ManifestSanitization(manifestPath, originalText, updatedText);
+    }
 
-        File.WriteAllText(manifestPath, updatedText);
-        if (entries is not null && backupPath is not null)
+    private static bool IsShopPedApparelMetadataFile(string path)
+    {
+        try
         {
-            entries.Add(new BackupEntry(
-                "resource-manifest",
-                manifestPath,
-                backupPath,
-                manifestPath,
-                ComputeSha256(manifestPath),
-                ComputeSha256(manifestPath),
-                DateTimeOffset.UtcNow));
+            return XDocument.Load(path).Root?.Name.LocalName == "ShopPedApparel";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return false;
         }
     }
 
-    private static string? FindResourceManifestPath(string resourceRoot)
-    {
-        foreach (var manifestName in new[] { "fxmanifest.lua", "__resource.lua" })
-        {
-            var path = Path.Combine(resourceRoot, manifestName);
-            if (File.Exists(path))
-            {
-                return path;
-            }
-        }
 
-        return null;
-    }
-
-    private static string SanitizeManifestText(string text)
+    private static string SanitizeManifestText(string text, IReadOnlySet<string> migratedPaths)
     {
-        var lines = text.Split(["\r\n", "\n"], StringSplitOptions.None);
-        var sanitizedLines = new List<string>(lines.Length);
-        foreach (var line in lines)
+        var sanitized = new StringBuilder(text.Length);
+        var start = 0;
+        while (start < text.Length)
         {
-            if (IsManifestDataFileLine(line) || IsManifestFilesEntryLine(line))
+            var lineEnd = start;
+            while (lineEnd < text.Length && text[lineEnd] is not '\r' and not '\n')
             {
-                continue;
+                lineEnd++;
             }
 
-            sanitizedLines.Add(line);
+            var segmentEnd = lineEnd;
+            if (segmentEnd < text.Length)
+            {
+                segmentEnd += text[segmentEnd] == '\r'
+                              && segmentEnd + 1 < text.Length
+                              && text[segmentEnd + 1] == '\n'
+                    ? 2
+                    : 1;
+            }
+
+            var line = text[start..lineEnd];
+            if (!IsManifestMigratedDataFileLine(line, migratedPaths)
+                && !IsManifestMigratedFilesEntryLine(line, migratedPaths))
+            {
+                sanitized.Append(text, start, segmentEnd - start);
+            }
+
+            start = segmentEnd;
         }
 
-        return string.Join(Environment.NewLine, sanitizedLines);
+        return sanitized.ToString();
     }
 
-    private static bool IsManifestDataFileLine(string line)
-        => Regex.IsMatch(line, @"^\s*data_file\s+'(?:SHOP_PED_APPAREL_META_FILE|ALTERNATE_VARIATIONS_FILE|PED_FIRST_PERSON_ALTERNATE_DATA)'", RegexOptions.IgnoreCase);
-
-    private static bool IsManifestFilesEntryLine(string line)
+    private static bool IsManifestMigratedDataFileLine(string line, IReadOnlySet<string> migratedPaths)
     {
-        var match = Regex.Match(line, @"^\s*'([^']+)'\s*,?\s*$");
-        if (!match.Success)
+        var values = Regex.Matches(line, @"(?:""([^""]*)""|'([^']*)')")
+            .Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value)
+            .ToList();
+        if (values.Count < 2
+            || !Regex.IsMatch(values[0], @"^(SHOP_PED_APPAREL_META_FILE|ALTERNATE_VARIATIONS_FILE|PED_FIRST_PERSON_ALTERNATE_DATA)$", RegexOptions.IgnoreCase))
         {
             return false;
         }
 
-        var value = match.Groups[1].Value;
-        return value.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
-            && !value.Contains('*')
-            && !value.Contains('?');
+        return migratedPaths.Contains(NormalizeManifestPath(values[1]));
     }
+
+    private static bool IsManifestMigratedFilesEntryLine(string line, IReadOnlySet<string> migratedPaths)
+    {
+        var values = Regex.Matches(line, @"(?:""([^""]*)""|'([^']*)')")
+            .Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value)
+            .ToList();
+        return values.Count == 1 && migratedPaths.Contains(NormalizeManifestPath(values[0]));
+    }
+
+    private static string NormalizeManifestPath(string path)
+        => path.Trim().TrimStart('.', '/', '\\').Replace('\\', '/');
 
     private static IReadOnlyList<string> GetResourceRootsForCopy(MergePlan plan)
     {
@@ -1196,42 +1411,12 @@ public sealed class RepackerService
     }
 
     private static IReadOnlyList<string> GetKnownResourceRoots(MergePlan plan)
-    {
-        var roots = plan.ResourceRoots
+        => plan.ResourceRoots
             .Where(root => !string.IsNullOrWhiteSpace(root))
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (roots.Count > 0)
-        {
-            return roots;
-        }
-
-        roots = plan.SourceYmts
-            .Select(source => TryInferResourceRoot(source.Path, source.Resource))
-            .OfType<string>()
-            .Select(Path.GetFullPath)
+            .Select(SafePath.Normalize)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return roots;
-    }
-
-    private static string? TryInferResourceRoot(string path, string resourceName)
-    {
-        var directory = Directory.Exists(path) ? new DirectoryInfo(path) : Directory.GetParent(path);
-        while (directory is not null)
-        {
-            if (directory.Name.Equals(resourceName, StringComparison.OrdinalIgnoreCase))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        return null;
-    }
 
     private static void ValidateResourceCopyDestination(string sourceRoot, string destinationRoot)
     {
@@ -1283,17 +1468,13 @@ public sealed class RepackerService
     }
 
     private static string GetResourceCopyDestination(string sourceRoot, string generatedResourcesRoot)
-        => Path.Combine(Path.GetFullPath(generatedResourcesRoot), Path.GetFileName(NormalizePath(sourceRoot)));
+        => SafePath.ResolveInsideRoot(generatedResourcesRoot, Path.GetFileName(SafePath.Normalize(sourceRoot)));
 
     private static bool PathsEqual(string left, string right)
-        => NormalizePath(left).Equals(NormalizePath(right), StringComparison.OrdinalIgnoreCase);
+        => SafePath.PathsEqual(left, right);
 
     private static bool IsPathInside(string path, string parent)
-    {
-        var normalizedPath = NormalizePath(path);
-        var normalizedParent = NormalizePath(parent);
-        return normalizedPath.StartsWith(normalizedParent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-    }
+        => SafePath.IsInside(path, parent);
 
     private static bool IsPathAtOrInside(string path, string parent)
         => PathsEqual(path, parent) || IsPathInside(path, parent);
@@ -1302,25 +1483,31 @@ public sealed class RepackerService
         => roots.Any(root => IsPathAtOrInside(path, root));
 
     private static string NormalizePath(string path)
-        => Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        => SafePath.Normalize(path);
+
 
     public async Task<RestoreManifestPreview> LoadRestoreManifestPreviewAsync(string backupManifestPath, CancellationToken cancellationToken = default)
     {
-        var entries = await LoadBackupEntriesAsync(backupManifestPath, cancellationToken);
-        var (actions, skippedActions) = PlanRestoreActions(entries);
-        return new RestoreManifestPreview(Path.GetFullPath(backupManifestPath), entries, actions, skippedActions);
+        var loaded = await LoadBackupManifestAsync(backupManifestPath, cancellationToken);
+        ValidateManifestPaths(loaded);
+        ReconcilePlannedEntries(loaded);
+        var (actions, skippedActions) = PlanRestoreActions(loaded);
+        return new RestoreManifestPreview(Path.GetFullPath(backupManifestPath), loaded.Manifest.Entries, actions, skippedActions);
     }
 
     public async Task RestoreAsync(string backupManifestPath, IProgress<OperationProgress>? progress = null, CancellationToken cancellationToken = default)
     {
-        var preview = await LoadRestoreManifestPreviewAsync(backupManifestPath, cancellationToken);
-        var actions = preview.Actions;
+        var loaded = await LoadBackupManifestAsync(backupManifestPath, cancellationToken);
+        ValidateManifestPaths(loaded);
+        ReconcilePlannedEntries(loaded);
+        ValidateRestorePreflight(loaded);
+        var (actions, _) = PlanRestoreActions(loaded);
 
         progress?.Report(new OperationProgress(
             "restore",
             "start",
             Total: actions.Count,
-            Message: $"Preparing to restore {actions.Count} action(s) from {preview.ManifestPath}."));
+            Message: $"Preparing to restore {actions.Count} action(s) from {Path.GetFullPath(backupManifestPath)}."));
 
         var completed = 0;
         foreach (var action in actions.Where(action => action.Kind == "delete-generated-resource"))
@@ -1349,9 +1536,15 @@ public sealed class RepackerService
                 continue;
             }
 
+            if (File.Exists(action.DestinationPath)
+                && action.Entry.Kind != "resource-manifest"
+                && ComputeSha256(action.DestinationPath).Equals(action.Entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(action.DestinationPath)!);
             File.Copy(action.SourcePath, action.DestinationPath, overwrite: true);
-
             completed++;
             progress?.Report(new OperationProgress(
                 "restore",
@@ -1371,7 +1564,10 @@ public sealed class RepackerService
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(action.DestinationPath)!);
-            File.Move(action.SourcePath, action.DestinationPath, overwrite: true);
+            if (!File.Exists(action.DestinationPath))
+            {
+                File.Move(action.SourcePath, action.DestinationPath);
+            }
 
             completed++;
             progress?.Report(new OperationProgress(
@@ -1391,28 +1587,69 @@ public sealed class RepackerService
             Message: $"Restore complete. Applied {completed} action(s)."));
     }
 
-    private async Task<List<BackupEntry>> LoadBackupEntriesAsync(string backupManifestPath, CancellationToken cancellationToken)
-        => JsonSerializer.Deserialize<List<BackupEntry>>(await File.ReadAllTextAsync(backupManifestPath, cancellationToken), _jsonOptions)
-           ?? throw new InvalidDataException("Invalid backup manifest.");
-
-    private static (IReadOnlyList<RestoreAction> Actions, IReadOnlyList<RestoreAction> SkippedActions) PlanRestoreActions(IReadOnlyList<BackupEntry> entries)
+    private async Task<LoadedBackupManifest> LoadBackupManifestAsync(string backupManifestPath, CancellationToken cancellationToken)
     {
-        var generatedRoots = entries
-            .Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null)
-            .Select(entry => entry.AppliedPath!)
-            .ToList();
+        var fullManifestPath = Path.GetFullPath(backupManifestPath);
+        var json = await File.ReadAllTextAsync(fullManifestPath, cancellationToken);
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind == JsonValueKind.Object)
+        {
+            var manifest = JsonSerializer.Deserialize<BackupManifest>(json, _jsonOptions)
+                ?? throw new InvalidDataException("Invalid backup manifest.");
+            if (manifest.SchemaVersion != 2)
+            {
+                throw new InvalidDataException($"Unsupported backup manifest schema version {manifest.SchemaVersion}.");
+            }
 
+            return new LoadedBackupManifest(fullManifestPath, manifest, IsLegacy: false);
+        }
+
+        if (document.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            var entries = JsonSerializer.Deserialize<List<BackupEntry>>(json, _jsonOptions)
+                ?? throw new InvalidDataException("Invalid legacy backup manifest.");
+            return new LoadedBackupManifest(
+                fullManifestPath,
+                new BackupManifest
+                {
+                    SchemaVersion = 1,
+                    BackupRoot = Path.GetDirectoryName(fullManifestPath) ?? string.Empty,
+                    Entries = entries,
+                },
+                IsLegacy: true);
+        }
+
+        throw new InvalidDataException("Invalid backup manifest.");
+    }
+
+    private static (IReadOnlyList<RestoreAction> Actions, IReadOnlyList<RestoreAction> SkippedActions) PlanRestoreActions(LoadedBackupManifest loaded)
+    {
+        var entries = loaded.Manifest.Entries;
+        var generatedRoots = loaded.IsLegacy
+            ? []
+            : entries
+                .Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null)
+                .Select(entry => entry.AppliedPath!)
+                .ToList();
         var actions = new List<RestoreAction>();
         var skippedActions = new List<RestoreAction>();
 
         foreach (var entry in entries.Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null))
         {
-            actions.Add(new RestoreAction(
+            var action = new RestoreAction(
                 "delete-generated-resource",
                 $"Remove generated resource {entry.AppliedPath}",
                 null,
                 entry.AppliedPath,
-                entry));
+                entry);
+            if (loaded.IsLegacy)
+            {
+                skippedActions.Add(action with { Description = $"{action.Description} manually; legacy manifests do not contain trustworthy root provenance." });
+            }
+            else
+            {
+                actions.Add(action);
+            }
         }
 
         foreach (var entry in entries.Where(IsSourceBackupEntry))
@@ -1423,14 +1660,14 @@ public sealed class RepackerService
                 entry.BackupPath,
                 entry.OriginalPath,
                 entry);
-
-            if (entry.BackupPath is null || IsUnderAnyRoot(entry.OriginalPath, generatedRoots))
+            if (entry.BackupPath is null || (!loaded.IsLegacy && IsUnderAnyRoot(entry.OriginalPath, generatedRoots)))
             {
                 skippedActions.Add(action);
-                continue;
             }
-
-            actions.Add(action);
+            else
+            {
+                actions.Add(action);
+            }
         }
 
         foreach (var entry in entries.Where(entry => entry.Kind == "stream-rename"))
@@ -1441,20 +1678,359 @@ public sealed class RepackerService
                 entry.AppliedPath,
                 entry.OriginalPath,
                 entry);
-
-            if (entry.AppliedPath is null
-                || IsUnderAnyRoot(entry.OriginalPath, generatedRoots)
-                || IsUnderAnyRoot(entry.AppliedPath, generatedRoots))
+            if (entry.AppliedPath is null || (!loaded.IsLegacy && (IsUnderAnyRoot(entry.OriginalPath, generatedRoots) || IsUnderAnyRoot(entry.AppliedPath, generatedRoots))))
             {
                 skippedActions.Add(action);
-                continue;
             }
-
-            actions.Add(action);
+            else
+            {
+                actions.Add(action);
+            }
         }
 
         return (actions, skippedActions);
     }
+    private static void ValidateManifestPaths(LoadedBackupManifest loaded)
+    {
+        var errors = new List<string>();
+        var manifestDirectory = Path.GetDirectoryName(loaded.ManifestPath) ?? string.Empty;
+        if (loaded.IsLegacy)
+        {
+            foreach (var entry in loaded.Manifest.Entries)
+            {
+                if (entry.BackupPath is not null)
+                {
+                    try
+                    {
+                        SafePath.RequireInside(entry.BackupPath, manifestDirectory, allowEqual: false);
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        errors.Add(ex.Message);
+                    }
+                }
+            }
+        }
+        else
+        {
+            try
+            {
+                SafePath.RequireInside(loaded.ManifestPath, loaded.Manifest.BackupRoot, allowEqual: false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                errors.Add($"Manifest path is outside its recorded backup root: {ex.Message}");
+            }
+
+            var sourceRoots = loaded.Manifest.SourceRoots.Select(SafePath.Normalize).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var generatedRoot = SafePath.Normalize(loaded.Manifest.GeneratedResourcesRoot);
+            foreach (var entry in loaded.Manifest.Entries)
+            {
+                foreach (var path in new[] { entry.BackupPath, entry.OriginalPath, entry.AppliedPath }.Where(path => path is not null))
+                {
+                    try
+                    {
+                        var allowed = entry.Kind == "generated-resource"
+                            ? generatedRoot
+                            : entry.BackupPath == path
+                                ? loaded.Manifest.BackupRoot
+                                : sourceRoots.FirstOrDefault(root => SafePath.IsInside(path!, root))
+                                  ?? (SafePath.IsInside(path!, generatedRoot) ? generatedRoot : null);
+                        if (allowed is null)
+                        {
+                            errors.Add($"Manifest entry path is outside recorded roots: {path}");
+                        }
+                        else
+                        {
+                            var allowEqual = entry.Kind == "generated-resource" && SafePath.PathsEqual(path!, generatedRoot);
+                            SafePath.RequireInside(path!, allowed, allowEqual);
+                        }
+                    }
+                    catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
+                    {
+                        errors.Add($"Unsafe manifest entry path '{path}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(Environment.NewLine, errors.Distinct(StringComparer.OrdinalIgnoreCase)));
+        }
+    }
+
+    private static void ValidateRestorePreflight(LoadedBackupManifest loaded)
+    {
+        var errors = new List<string>();
+        var entries = loaded.Manifest.Entries;
+        var generatedEntries = entries.Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null).ToList();
+        foreach (var entry in generatedEntries)
+        {
+            if (loaded.IsLegacy)
+            {
+                continue;
+            }
+
+            if (Directory.Exists(entry.AppliedPath) && !File.Exists(Path.Combine(entry.AppliedPath!, OwnershipMarkerFileName)))
+            {
+                errors.Add($"Refusing to remove unowned generated resource during restore: {entry.AppliedPath}");
+            }
+        }
+
+        ValidateGeneratedFileInventory(loaded, generatedEntries, errors);
+
+        foreach (var entry in entries.Where(entry => IsSourceBackupEntry(entry)))
+        {
+            var backupHash = entry.Sha256Before;
+            if (entry.BackupPath is null || !File.Exists(entry.BackupPath))
+            {
+                errors.Add($"Backup file is missing for {entry.OriginalPath}: {entry.BackupPath}");
+                continue;
+            }
+
+            if (!ComputeSha256(entry.BackupPath).Equals(backupHash, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"Backup hash mismatch for {entry.OriginalPath}: {entry.BackupPath}");
+                continue;
+            }
+
+            if (entry.AppliedPath is not null && entry.Kind == "resource-manifest")
+            {
+                if (!File.Exists(entry.AppliedPath))
+                {
+                    errors.Add($"Applied manifest is missing: {entry.AppliedPath}");
+                }
+                else if (entry.Sha256After is null || !ComputeSha256(entry.AppliedPath).Equals(entry.Sha256After, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Modified post-Apply file blocks restore: {entry.AppliedPath}");
+                }
+
+                continue;
+            }
+
+            if (File.Exists(entry.OriginalPath))
+            {
+                var currentHash = ComputeSha256(entry.OriginalPath);
+                if (!currentHash.Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Destination conflict blocks restore for {entry.OriginalPath} (modified post-Apply).");
+                }
+            }
+        }
+
+        foreach (var entry in entries.Where(entry => entry.Kind == "stream-rename"))
+        {
+            if (string.IsNullOrWhiteSpace(entry.Sha256After))
+            {
+                errors.Add(loaded.IsLegacy
+                    ? $"Legacy stream restore requires a recorded applied hash: {entry.AppliedPath}"
+                    : $"Planned stream mutation could not be reconciled safely: {entry.AppliedPath}");
+                continue;
+            }
+            if (entry.AppliedPath is null)
+            {
+                errors.Add($"Stream rename entry has no applied path: {entry.OriginalPath}");
+                continue;
+            }
+
+            if (!File.Exists(entry.AppliedPath))
+            {
+                if (!File.Exists(entry.OriginalPath) || !ComputeSha256(entry.OriginalPath).Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Applied stream file is missing: {entry.AppliedPath}");
+                }
+
+                continue;
+            }
+
+            var appliedHash = ComputeSha256(entry.AppliedPath);
+            if (entry.Sha256After is not null && !appliedHash.Equals(entry.Sha256After, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"Modified post-Apply file blocks restore: {entry.AppliedPath}");
+            }
+
+
+            if (File.Exists(entry.OriginalPath))
+            {
+                errors.Add($"Destination conflict blocks stream restore: {entry.OriginalPath}");
+            }
+        }
+
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(Environment.NewLine, errors.Distinct(StringComparer.OrdinalIgnoreCase)));
+        }
+    }
+    private static void ValidateGeneratedFileInventory(
+        LoadedBackupManifest loaded,
+        IReadOnlyList<BackupEntry> generatedEntries,
+        List<string> errors)
+    {
+        var fileEntries = loaded.Manifest.Entries
+            .Where(entry => entry.Kind == "generated-file")
+            .ToList();
+        foreach (var entry in fileEntries)
+        {
+            if (entry.AppliedPath is null || !File.Exists(entry.AppliedPath))
+            {
+                errors.Add($"Generated post-Apply file is missing: {entry.AppliedPath}");
+            }
+            else if (entry.Sha256After is null
+                     || !ComputeSha256(entry.AppliedPath).Equals(entry.Sha256After, StringComparison.OrdinalIgnoreCase))
+            {
+                errors.Add($"Modified post-Apply file blocks restore: {entry.AppliedPath}");
+            }
+        }
+
+        if (!loaded.Manifest.Completed)
+        {
+            return;
+        }
+
+        foreach (var root in generatedEntries
+                     .Select(entry => entry.AppliedPath!)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!Directory.Exists(root))
+            {
+                errors.Add($"Generated resource is missing: {root}");
+                continue;
+            }
+
+            var expected = fileEntries
+                .Where(entry => SafePath.PathsEqual(entry.OriginalPath, root) && entry.AppliedPath is not null)
+                .Select(entry => entry.AppliedPath!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            {
+                if (!expected.Contains(SafePath.Normalize(path)))
+                {
+                    errors.Add($"Unexpected post-Apply file blocks restore: {path}");
+                }
+            }
+        }
+    }
+
+    private static void RecordGeneratedFileEntries(BackupManifest manifest, CancellationToken cancellationToken)
+    {
+        manifest.Entries.RemoveAll(entry => entry.Kind == "generated-file");
+        var generatedRoots = manifest.Entries
+            .Where(entry => entry.Kind == "generated-resource" && entry.AppliedPath is not null)
+            .Select(entry => SafePath.Normalize(entry.AppliedPath!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var root in generatedRoots)
+        {
+            if (!Directory.Exists(root))
+            {
+                throw new DirectoryNotFoundException($"Generated resource disappeared before journaling: {root}");
+            }
+
+            foreach (var path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                         .Select(SafePath.Normalize)
+                         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                manifest.Entries.Add(new BackupEntry(
+                    "generated-file",
+                    root,
+                    null,
+                    path,
+                    string.Empty,
+                    ComputeSha256(path),
+                    DateTimeOffset.UtcNow,
+                    "applied"));
+            }
+        }
+    }
+
+    private static void ReconcilePlannedEntries(LoadedBackupManifest loaded)
+    {
+        foreach (var entry in loaded.Manifest.Entries.ToList())
+        {
+            if (!entry.State.Equals("planned", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (entry.Kind == "generated-resource")
+            {
+                var index = loaded.Manifest.Entries.IndexOf(entry);
+                var markerPath = entry.AppliedPath is null
+                    ? null
+                    : Path.Combine(entry.AppliedPath, OwnershipMarkerFileName);
+                if (markerPath is not null
+                    && File.Exists(markerPath)
+                    && entry.Sha256After is not null
+                    && ComputeSha256(markerPath).Equals(entry.Sha256After, StringComparison.OrdinalIgnoreCase))
+                {
+                    loaded.Manifest.Entries[index] = entry with { State = "applied" };
+                }
+                else
+                {
+                    loaded.Manifest.Entries.RemoveAt(index);
+                }
+
+                continue;
+            }
+
+            if (entry.Kind == "resource-manifest" && entry.AppliedPath is not null && File.Exists(entry.AppliedPath))
+            {
+                var currentHash = ComputeSha256(entry.AppliedPath);
+                var index = loaded.Manifest.Entries.IndexOf(entry);
+                if (entry.Sha256After is not null
+                    && currentHash.Equals(entry.Sha256After, StringComparison.OrdinalIgnoreCase))
+                {
+                    loaded.Manifest.Entries[index] = entry with { State = "applied" };
+                }
+                else if (currentHash.Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                {
+                    loaded.Manifest.Entries.RemoveAt(index);
+                }
+
+                continue;
+            }
+
+            if (entry.Kind == "stream-rename")
+            {
+                var index = loaded.Manifest.Entries.IndexOf(entry);
+                if (entry.AppliedPath is not null && !File.Exists(entry.OriginalPath) && File.Exists(entry.AppliedPath))
+                {
+                    var afterHash = ComputeSha256(entry.AppliedPath);
+                    if (afterHash.Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                    {
+                        loaded.Manifest.Entries[index] = entry with { State = "applied", Sha256After = afterHash };
+                    }
+                }
+                else if (File.Exists(entry.OriginalPath)
+                         && (entry.AppliedPath is null || !File.Exists(entry.AppliedPath))
+                         && ComputeSha256(entry.OriginalPath).Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                {
+                    loaded.Manifest.Entries.RemoveAt(index);
+                }
+
+                continue;
+            }
+
+            if (IsSourceBackupEntry(entry) && entry.Kind != "resource-manifest")
+            {
+                var index = loaded.Manifest.Entries.IndexOf(entry);
+                if (!File.Exists(entry.OriginalPath) && entry.BackupPath is not null && File.Exists(entry.BackupPath))
+                {
+                    loaded.Manifest.Entries[index] = entry with { State = "applied" };
+                }
+                else if (File.Exists(entry.OriginalPath)
+                         && ComputeSha256(entry.OriginalPath).Equals(entry.Sha256Before, StringComparison.OrdinalIgnoreCase))
+                {
+                    loaded.Manifest.Entries.RemoveAt(index);
+                }
+            }
+        }
+    }
+
+    private sealed record LoadedBackupManifest(string ManifestPath, BackupManifest Manifest, bool IsLegacy);
 
     public IReadOnlyList<string> ValidatePlan(MergePlan plan) => _planValidator.Validate(plan);
 
@@ -1463,6 +2039,7 @@ public sealed class RepackerService
         var result = new Dictionary<string, SourceYmt>(StringComparer.OrdinalIgnoreCase);
         for (var index = 0; index < plan.SourceYmts.Count; index++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var source = plan.SourceYmts[index];
             progress?.Report(new OperationProgress(
                 "build",
@@ -1492,6 +2069,7 @@ public sealed class RepackerService
         var result = new Dictionary<string, SourceCreatureMetadata>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in plan.SourceCreatureMetadata)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var xml = await _codec.DecodeToXmlAsync(source.Path, cancellationToken);
@@ -1527,11 +2105,11 @@ public sealed class RepackerService
     }
 
     private static XDocument BuildCreatureMetadataXml(
-        MergePlan plan,
         CreatureMetadataOutputPlan outputPlan,
         IReadOnlyDictionary<string, TargetCollectionPlan> targetPlansByCollection,
         Dictionary<string, SourceYmt> sources,
-        Dictionary<string, SourceCreatureMetadata> creatureMetadataByPath)
+        Dictionary<string, SourceCreatureMetadata> creatureMetadataByPath,
+        MappingIndex mappingIndex)
     {
         var builder = new CreatureMetadataBuilder();
         foreach (var targetCollection in outputPlan.TargetCollections)
@@ -1544,14 +2122,8 @@ public sealed class RepackerService
             foreach (var sourcePath in targetPlan.SourceYmts)
             {
                 var source = sources[sourcePath];
-                var sourceDrawableMappings = plan.DrawableMappings
-                    .Where(mapping => mapping.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)
-                                      && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                var sourcePropMappings = plan.PropMappings
-                    .Where(mapping => mapping.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)
-                                      && mapping.TargetFullCollection.Equals(targetPlan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                var sourceDrawableMappings = mappingIndex.GetDrawableMappings(targetPlan.FullCollectionName, sourcePath);
+                var sourcePropMappings = mappingIndex.GetPropMappings(targetPlan.FullCollectionName, sourcePath);
 
                 foreach (var binding in outputPlan.SourceBindings.Where(binding => binding.SourceYmtPath.Equals(sourcePath, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -1618,12 +2190,6 @@ public sealed class RepackerService
             .SelectMany(contribution => contribution.PropRanges.Values)
             .ToDictionary(range => range.SlotId, range => range);
 
-    private static bool TargetHasUnavailableCreatureMetadata(MergePlan plan, TargetCollectionPlan targetPlan)
-        => TargetHasUnavailableCreatureMetadata(
-            targetPlan,
-            plan.SourceYmts,
-            plan.BrokenCreatureMetadataBackups,
-            plan.MissingCreatureMetadataReferences);
 
     private static bool TargetHasUnavailableCreatureMetadata(
         TargetCollectionPlan targetPlan,
@@ -1790,48 +2356,6 @@ public sealed class RepackerService
         return outputs;
     }
 
-    private static IReadOnlyList<CreatureMetadataOutputPlan> GetCreatureMetadataOutputPlans(MergePlan plan)
-    {
-        if (plan.CreatureMetadataOutputs.Count > 0)
-        {
-            return plan.CreatureMetadataOutputs;
-        }
-
-        return plan.TargetCollections
-            .Where(target => !TargetHasUnavailableCreatureMetadata(plan, target))
-            .Where(target => HasCreatureMetadataContent(plan, target))
-            .Select(target => new CreatureMetadataOutputPlan(
-                $"MP_CreatureMetadata_{target.CollectionName}",
-                Path.Combine(plan.TargetResource, "stream", $"MP_CreatureMetadata_{target.CollectionName}.ymt").Replace(Path.DirectorySeparatorChar, '/'),
-                [target.CollectionName],
-                BuildLegacyCreatureMetadataBindings(plan, target)))
-            .ToList();
-    }
-
-    private static bool HasCreatureMetadataContent(MergePlan plan, TargetCollectionPlan targetPlan)
-    {
-        var sourcePaths = targetPlan.SourceYmts.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return plan.SourceCreatureMetadata.Any(metadata =>
-                   metadata.SourceYmts.Any(sourcePath => sourcePaths.Contains(sourcePath)))
-               || plan.SourceYmts.Any(source =>
-                   sourcePaths.Contains(source.Path) && source.HasCreatureRepairHints);
-    }
-
-    private static List<CreatureMetadataSourceBinding> BuildLegacyCreatureMetadataBindings(MergePlan plan, TargetCollectionPlan targetPlan)
-    {
-        var sourceResources = plan.SourceYmts
-            .Where(source => targetPlan.SourceYmts.Contains(source.Path, StringComparer.OrdinalIgnoreCase))
-            .ToDictionary(source => source.Path, source => source.Resource, StringComparer.OrdinalIgnoreCase);
-        var bindings = new List<CreatureMetadataSourceBinding>();
-        foreach (var (sourcePath, resource) in sourceResources)
-        {
-            bindings.AddRange(plan.SourceCreatureMetadata
-                .Where(metadata => metadata.Resource.Equals(resource, StringComparison.OrdinalIgnoreCase))
-                .Select(metadata => new CreatureMetadataSourceBinding(sourcePath, metadata.Path)));
-        }
-
-        return bindings;
-    }
 
     private static List<AlternateMetadataOutputPlan> BuildAlternateMetadataOutputPlans(
         IReadOnlyList<SourceAlternateMetadata> alternateMetadata,
@@ -1870,6 +2394,108 @@ public sealed class RepackerService
     private static string SanitizeMetadataName(string name)
         => Regex.Replace(string.IsNullOrWhiteSpace(name) ? "merged" : name, @"[^A-Za-z0-9_]+", "_");
 
+    private sealed class MappingIndex
+    {
+        private readonly Dictionary<string, Dictionary<(int Slot, int Index), DrawableMapping>> _drawablesByTarget = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Dictionary<(int Slot, int Index), PropMapping>> _propsByTarget = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Dictionary<string, List<DrawableMapping>>> _drawablesByTargetSource = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Dictionary<string, List<PropMapping>>> _propsByTargetSource = new(StringComparer.OrdinalIgnoreCase);
+
+        public static MappingIndex Create(
+            IReadOnlyList<DrawableMapping> drawableMappings,
+            IReadOnlyList<PropMapping> propMappings)
+        {
+            var index = new MappingIndex();
+            foreach (var mapping in drawableMappings)
+            {
+                if (!index._drawablesByTarget.TryGetValue(mapping.TargetFullCollection, out var targetMappings))
+                {
+                    targetMappings = [];
+                    index._drawablesByTarget.Add(mapping.TargetFullCollection, targetMappings);
+                }
+
+                targetMappings.Add((mapping.ComponentId, mapping.NewDrawableIndex), mapping);
+                AddSource(index._drawablesByTargetSource, mapping.TargetFullCollection, mapping.SourceYmtPath, mapping);
+            }
+
+            foreach (var mapping in propMappings)
+            {
+                if (!index._propsByTarget.TryGetValue(mapping.TargetFullCollection, out var targetMappings))
+                {
+                    targetMappings = [];
+                    index._propsByTarget.Add(mapping.TargetFullCollection, targetMappings);
+                }
+
+                targetMappings.Add((mapping.AnchorId, mapping.NewPropIndex), mapping);
+                AddSource(index._propsByTargetSource, mapping.TargetFullCollection, mapping.SourceYmtPath, mapping);
+            }
+
+            return index;
+        }
+
+        public IReadOnlyList<DrawableMapping> GetDrawableMappings(string target, string source)
+            => GetSourceMappings(_drawablesByTargetSource, target, source);
+
+        public IReadOnlyList<PropMapping> GetPropMappings(string target, string source)
+            => GetSourceMappings(_propsByTargetSource, target, source);
+
+        public bool TryGetDrawable(string target, int slot, int index, out DrawableMapping mapping)
+        {
+            if (_drawablesByTarget.TryGetValue(target, out var mappings)
+                && mappings.TryGetValue((slot, index), out var found))
+            {
+                mapping = found;
+                return true;
+            }
+
+            mapping = null!;
+            return false;
+        }
+
+        public bool TryGetProp(string target, int anchor, int index, out PropMapping mapping)
+        {
+            if (_propsByTarget.TryGetValue(target, out var mappings)
+                && mappings.TryGetValue((anchor, index), out var found))
+            {
+                mapping = found;
+                return true;
+            }
+
+            mapping = null!;
+            return false;
+        }
+
+        private static IReadOnlyList<TMapping> GetSourceMappings<TMapping>(
+            Dictionary<string, Dictionary<string, List<TMapping>>> index,
+            string target,
+            string source)
+            => index.TryGetValue(target, out var bySource)
+               && bySource.TryGetValue(source, out var mappings)
+                ? mappings
+                : Array.Empty<TMapping>();
+
+        private static void AddSource<TMapping>(
+            Dictionary<string, Dictionary<string, List<TMapping>>> index,
+            string target,
+            string source,
+            TMapping mapping)
+        {
+            if (!index.TryGetValue(target, out var bySource))
+            {
+                bySource = new Dictionary<string, List<TMapping>>(StringComparer.OrdinalIgnoreCase);
+                index.Add(target, bySource);
+            }
+
+            if (!bySource.TryGetValue(source, out var mappings))
+            {
+                mappings = [];
+                bySource.Add(source, mappings);
+            }
+
+            mappings.Add(mapping);
+        }
+    }
+
     private sealed record PendingCreatureMetadataOutput(string Key)
     {
         public List<string> TargetCollections { get; } = [];
@@ -1881,7 +2507,39 @@ public sealed class RepackerService
            || path.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase)
            || path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
 
-    private async Task<IReadOnlyList<string>> FilterDuplicateXmlSidecarsAsync(IReadOnlyList<string> paths, CancellationToken cancellationToken)
+    private static bool IsExplicitYmtPath(string path)
+        => path.EndsWith(".ymt", StringComparison.OrdinalIgnoreCase)
+           || path.EndsWith(".ymt.xml", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsSupportedClothingRoot(XDocument xml)
+        => xml.Root?.Name.LocalName is "CPedVariationInfo" or "CCreatureMetaData";
+
+    private async Task<XDocument> DecodeToXmlCachedAsync(
+        string path,
+        CancellationToken cancellationToken,
+        Dictionary<string, Task<XDocument>> decodedDocuments)
+    {
+        if (!decodedDocuments.TryGetValue(path, out var decodeTask))
+        {
+            try
+            {
+                decodeTask = _codec.DecodeToXmlAsync(path, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                decodeTask = Task.FromException<XDocument>(ex);
+            }
+
+            decodedDocuments[path] = decodeTask;
+        }
+
+        return await decodeTask;
+    }
+
+    private async Task<IReadOnlyList<string>> FilterDuplicateXmlSidecarsAsync(
+        IReadOnlyList<string> paths,
+        CancellationToken cancellationToken,
+        Dictionary<string, Task<XDocument>> decodedDocuments)
     {
         var pathSet = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var skippedXmlPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1896,16 +2554,20 @@ public sealed class RepackerService
 
             try
             {
-                var xml = await _codec.DecodeToXmlAsync(path, cancellationToken);
-                var ymtXml = await _codec.DecodeToXmlAsync(ymtPath, cancellationToken);
+                var xml = await DecodeToXmlCachedAsync(path, cancellationToken, decodedDocuments);
+                var ymtXml = await DecodeToXmlCachedAsync(ymtPath, cancellationToken, decodedDocuments);
                 if (XmlDocumentsMatch(xml, ymtXml))
                 {
                     skippedXmlPaths.Add(path);
                 }
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch
             {
-                // Keep both files in the work list so normal analysis can report the real decode/parse error.
+                // Keep both files in the work list; explicit YMT paths report decode errors while unrelated XML is ignored.
             }
         }
 
@@ -1995,11 +2657,13 @@ public sealed class RepackerService
     private static IReadOnlyList<SourceAlternateMetadata> ReadAlternateMetadataFiles(
         string resourceName,
         string resourceRoot,
-        IReadOnlyList<string> metaFiles)
+        IReadOnlyList<string> metaFiles,
+        CancellationToken cancellationToken)
     {
         var result = new List<SourceAlternateMetadata>();
         foreach (var path in metaFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var xml = XDocument.Load(path, LoadOptions.PreserveWhitespace);
@@ -2024,6 +2688,7 @@ public sealed class RepackerService
 
         return result;
     }
+    private sealed record ManifestSanitization(string Path, string OriginalText, string UpdatedText);
 
     private static int CountAlternateMetadataItems(SourceAlternateMetadata metadata)
         => metadata.Kind switch
@@ -2217,29 +2882,12 @@ public sealed class RepackerService
     private static SourceShopMetadataIndex LoadSourceShopMetadataIndex(MergePlan plan, CancellationToken cancellationToken)
     {
         var index = new SourceShopMetadataIndex();
-        var sourceResources = plan.SourceYmts
-            .Select(source => source.Resource)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var resourceRoots = GetKnownResourceRoots(plan)
-            .Where(Directory.Exists)
-            .ToList();
-        if (resourceRoots.Count == 0)
+        foreach (var fingerprint in plan.SourceFiles
+                     .Where(item => item.Kind.Equals("shop-metadata", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase))
         {
-            return index;
-        }
-
-        foreach (var resource in new ResourceScanner().ScanResourceFolders(resourceRoots, cancellationToken: cancellationToken))
-        {
-            if (!sourceResources.Contains(resource.ResourceName))
-            {
-                continue;
-            }
-
-            foreach (var path in resource.ShopMetaFiles)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                index.Add(resource.ResourceName, path);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            index.Add(Path.GetFileName(SafePath.Normalize(fingerprint.ResourceRoot)), fingerprint.Path);
         }
 
         return index;
@@ -2249,8 +2897,7 @@ public sealed class RepackerService
         TargetCollectionPlan plan,
         XDocument pedVariationXml,
         SourceShopMetadataIndex sourceShopMetadata,
-        IReadOnlyList<DrawableMapping> drawableMappings,
-        IReadOnlyList<PropMapping> propMappings,
+        MappingIndex mappingIndex,
         string? creatureMetadataName = null)
         => new(
             new XDeclaration("1.0", "utf-8", null),
@@ -2261,14 +2908,14 @@ public sealed class RepackerService
                 new XElement("eCharacter", GetCharacterName(plan.Gender)),
                 string.IsNullOrWhiteSpace(creatureMetadataName) ? null : new XElement("creatureMetaData", creatureMetadataName),
                 new XElement("pedOutfits", new XAttribute("itemType", "ShopPedOutfit")),
-                new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml, sourceShopMetadata, drawableMappings)),
-                new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml, sourceShopMetadata, propMappings))));
+                new XElement("pedComponents", new XAttribute("itemType", "ShopPedComponent"), BuildShopComponentItems(plan, pedVariationXml, sourceShopMetadata, mappingIndex)),
+                new XElement("pedProps", new XAttribute("itemType", "ShopPedProp"), BuildShopPropItems(plan, pedVariationXml, sourceShopMetadata, mappingIndex))));
 
     private static IEnumerable<XNode> BuildShopComponentItems(
         TargetCollectionPlan plan,
         XDocument pedVariationXml,
         SourceShopMetadataIndex sourceShopMetadata,
-        IReadOnlyList<DrawableMapping> drawableMappings)
+        MappingIndex mappingIndex)
     {
         var root = pedVariationXml.Root;
         if (root is null)
@@ -2276,11 +2923,6 @@ public sealed class RepackerService
             yield break;
         }
 
-        var mappingsByTargetDrawable = drawableMappings
-            .Where(mapping => mapping.TargetFullCollection.Equals(plan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(
-                mapping => (mapping.ComponentId, mapping.NewDrawableIndex),
-                mapping => mapping);
         var availComp = XmlHelpers.ParseIntList(root.Element("availComp")?.Value ?? string.Empty);
         var componentData = XmlHelpers.Items(root.Element("aComponentData3"));
         for (var componentId = 0; componentId < Math.Min(availComp.Length, ClothingConstants.ComponentSlotCount); componentId++)
@@ -2299,7 +2941,7 @@ public sealed class RepackerService
                 var textureCount = Math.Max(1, XmlHelpers.Items(drawables[drawableIndex].Element("aTexData")).Count);
                 for (var textureIndex = 0; textureIndex < textureCount; textureIndex++)
                 {
-                    if (!mappingsByTargetDrawable.TryGetValue((componentId, drawableIndex), out var mapping)
+                    if (!mappingIndex.TryGetDrawable(plan.FullCollectionName, componentId, drawableIndex, out var mapping)
                         || !sourceShopMetadata.TryGetComponent(mapping.SourceResource, mapping.SourceFullCollection, componentId, mapping.OldDrawableIndex, textureIndex, out var sourceEntry))
                     {
                         continue;
@@ -2325,7 +2967,7 @@ public sealed class RepackerService
         TargetCollectionPlan plan,
         XDocument pedVariationXml,
         SourceShopMetadataIndex sourceShopMetadata,
-        IReadOnlyList<PropMapping> propMappings)
+        MappingIndex mappingIndex)
     {
         var root = pedVariationXml.Root;
         if (root is null)
@@ -2333,11 +2975,6 @@ public sealed class RepackerService
             yield break;
         }
 
-        var mappingsByTargetProp = propMappings
-            .Where(mapping => mapping.TargetFullCollection.Equals(plan.FullCollectionName, StringComparison.OrdinalIgnoreCase))
-            .ToDictionary(
-                mapping => (mapping.AnchorId, mapping.NewPropIndex),
-                mapping => mapping);
         var propMetadata = XmlHelpers.Items(root.Element("propInfo")?.Element("aPropMetaData"))
             .Select(item => new
             {
@@ -2356,7 +2993,7 @@ public sealed class RepackerService
             {
                 var prefix = ClothingConstants.PropPrefixes.GetValueOrDefault(prop.AnchorId, $"prop_{prop.AnchorId}");
                 var uniqueName = $"{plan.FullCollectionName}_{prefix}_{prop.PropId:000}_{textureIndex:00}";
-                if (!mappingsByTargetProp.TryGetValue((prop.AnchorId, prop.PropId), out var mapping)
+                if (!mappingIndex.TryGetProp(plan.FullCollectionName, prop.AnchorId, prop.PropId, out var mapping)
                     || !sourceShopMetadata.TryGetProp(mapping.SourceResource, mapping.SourceFullCollection, prop.AnchorId, mapping.OldPropIndex, textureIndex, out var sourceEntry))
                 {
                     continue;
@@ -2604,6 +3241,7 @@ RegisterCommand('clothing_repacker_validate', function()
                 print(('  PASS %s %d -> %d'):format(kind, index, actual))
             end
             return
+
         end
 
         failures = failures + 1
@@ -2625,6 +3263,7 @@ RegisterCommand('clothing_repacker_validate', function()
         end
     end
 
+
     if failures == 0 then
         print(('Clothing collection validation PASSED: %d checks matched expected counts.'):format(checked))
         return
@@ -2635,12 +3274,206 @@ end, false)
 """;
     }
 
+    private static void ValidateCurrentFingerprints(MergePlan plan)
+    {
+        var failures = new List<string>();
+        foreach (var fingerprint in plan.SourceFiles)
+        {
+            try
+            {
+                var path = SafePath.RequireInside(fingerprint.Path, fingerprint.ResourceRoot, allowEqual: false);
+                if (!File.Exists(path))
+                {
+                    failures.Add($"{path} (missing)");
+                    continue;
+                }
+
+                var actual = ComputeSha256(path);
+                if (!actual.Equals(fingerprint.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    failures.Add($"{path} (changed)");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                failures.Add($"{fingerprint.Path} ({ex.Message})");
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new InvalidOperationException("Source fingerprint preflight failed:" + Environment.NewLine + string.Join(Environment.NewLine, failures));
+        }
+    }
+
+    private static string CreateStagingRoot(string operation, string? parent = null)
+    {
+        var stagingParent = parent ?? Path.GetTempPath();
+        Directory.CreateDirectory(stagingParent);
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var path = Path.Combine(stagingParent, $"clothing-repacker-{operation}-{Guid.NewGuid():N}");
+            try
+            {
+                Directory.CreateDirectory(path);
+                return path;
+            }
+            catch (IOException) when (attempt < 9)
+            {
+            }
+        }
+
+        throw new IOException($"Could not create a unique {operation} staging directory.");
+    }
+
+    private static void DeleteStagingRoot(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+    }
+
+    private const string OwnershipMarkerFileName = ".clothing-repacker-owned";
+    private static void WriteOwnershipMarker(string resourceRoot, string markerValue = "clothing-repacker")
+    {
+        Directory.CreateDirectory(resourceRoot);
+        File.WriteAllText(Path.Combine(resourceRoot, OwnershipMarkerFileName), markerValue);
+    }
+
+    private static void EnsureOwnedDirectory(string resourceRoot)
+    {
+        if (!File.Exists(Path.Combine(resourceRoot, OwnershipMarkerFileName)))
+        {
+            throw new InvalidOperationException($"Refusing to replace unowned destination: {resourceRoot}");
+        }
+    }
+
+    private static void ReplaceOwnedDirectory(string stagedRoot, string finalRoot)
+    {
+        if (Directory.Exists(finalRoot))
+        {
+            EnsureOwnedDirectory(finalRoot);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(finalRoot)!);
+        var displacedRoot = $"{finalRoot}.old-{Guid.NewGuid():N}";
+        var displaced = false;
+        try
+        {
+            if (Directory.Exists(finalRoot))
+            {
+                Directory.Move(finalRoot, displacedRoot);
+                displaced = true;
+            }
+
+            Directory.Move(stagedRoot, finalRoot);
+            if (displaced)
+            {
+                Directory.Delete(displacedRoot, recursive: true);
+            }
+        }
+        catch
+        {
+            if (!Directory.Exists(finalRoot) && displaced && Directory.Exists(displacedRoot))
+            {
+                Directory.Move(displacedRoot, finalRoot);
+            }
+
+            throw;
+        }
+    }
+
+    private static List<SourceFileFingerprint> BuildSourceFingerprints(
+        IReadOnlyList<ResourceScanItem> scanItems,
+        IReadOnlyList<SourceYmt> sources,
+        IReadOnlyList<SourceCreatureMetadata> creatureMetadata,
+        IReadOnlyList<SourceCreatureMetadata> brokenCreatureMetadata,
+        IReadOnlyList<SourceAlternateMetadata> alternateMetadata,
+        IReadOnlyList<StreamRename> streamRenames,
+        List<string> errors)
+    {
+        var fingerprints = new Dictionary<string, SourceFileFingerprint>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string path, string resourceRoot, string kind)
+        {
+            if (fingerprints.ContainsKey(path))
+            {
+                return;
+            }
+
+            try
+            {
+                fingerprints[path] = new SourceFileFingerprint(
+                    SafePath.Normalize(path),
+                    SafePath.Normalize(resourceRoot),
+                    kind,
+                    ComputeSha256(path));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                errors.Add($"{path}: could not fingerprint source file: {ex.Message}");
+            }
+        }
+
+        foreach (var source in sources)
+        {
+            Add(source.YmtPath, source.ResourceRoot, "ymt");
+        }
+
+        foreach (var metadata in creatureMetadata.Concat(brokenCreatureMetadata))
+        {
+            Add(metadata.Path, metadata.ResourceRoot, "creature-metadata");
+        }
+
+        foreach (var metadata in alternateMetadata)
+        {
+            Add(metadata.Path, metadata.ResourceRoot, "alternate-metadata");
+        }
+
+        foreach (var item in scanItems)
+        {
+            foreach (var path in item.YmtFiles)
+            {
+                Add(path, item.ResourceRoot, "ymt");
+            }
+        }
+
+        foreach (var item in scanItems)
+        {
+            foreach (var path in item.ShopMetaFiles)
+            {
+                Add(path, item.ResourceRoot, "shop-metadata");
+            }
+
+            if (item.ManifestPath is not null)
+            {
+                Add(item.ManifestPath, item.ResourceRoot, "resource-manifest");
+            }
+        }
+
+        foreach (var rename in streamRenames)
+        {
+            if (scanItems.FirstOrDefault(item => item.ResourceName.Equals(rename.SourceResource, StringComparison.OrdinalIgnoreCase)) is { } item)
+            {
+                Add(rename.SourcePath, item.ResourceRoot, "stream");
+            }
+        }
+
+        return fingerprints.Values
+            .OrderBy(fingerprint => fingerprint.Path, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     private static string ComputeSha256(string path)
     {
         using var stream = File.OpenRead(path);
         var hash = SHA256.HashData(stream);
         return Convert.ToHexString(hash);
     }
+
+    private static string ComputeSha256Utf8(string content)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
     private static void CopyDirectory(
         string source,

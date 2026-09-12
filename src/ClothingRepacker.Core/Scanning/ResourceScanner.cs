@@ -90,25 +90,53 @@ public sealed class ResourceScanner
 
     private static ResourceScanItem ScanResourceFolder(string resourceDir, CancellationToken cancellationToken)
     {
+        resourceDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(resourceDir));
         var resourceName = Path.GetFileName(resourceDir);
-        var files = Directory.GetFiles(resourceDir, "*", SearchOption.AllDirectories)
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        cancellationToken.ThrowIfCancellationRequested();
+        var ymtFiles = new List<string>();
+        var shopMetaFiles = new List<string>();
+        var streamFiles = new List<StreamFile>();
+        string? manifestPath = null;
+
+        foreach (var path in Directory.EnumerateFiles(resourceDir, "*", SearchOption.AllDirectories)
+                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Path.GetDirectoryName(path)!.Equals(resourceDir, StringComparison.OrdinalIgnoreCase)
+                && IsManifest(path)
+                && (manifestPath is null || Path.GetFileName(path).Equals("fxmanifest.lua", StringComparison.OrdinalIgnoreCase)))
+            {
+                manifestPath = path;
+            }
+
+            if (IsYmtCandidate(path))
+            {
+                ymtFiles.Add(path);
+            }
+
+            if (IsShopMetaCandidate(path))
+            {
+                shopMetaFiles.Add(path);
+            }
+
+            if (IsStreamCandidate(path))
+            {
+                streamFiles.Add(new StreamFile(
+                    resourceName,
+                    resourceDir,
+                    path,
+                    Path.GetFileName(path),
+                    Path.GetExtension(path),
+                    path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase)));
+            }
+        }
 
         return new ResourceScanItem(
             resourceName,
             resourceDir,
-            files.Where(IsYmtCandidate).ToList(),
-            files.Where(IsShopMetaCandidate).ToList(),
-            files.Where(IsStreamCandidate).Select(path => new StreamFile(
-                resourceName,
-                resourceDir,
-                path,
-                Path.GetFileName(path),
-                Path.GetExtension(path),
-                path.Contains($"{Path.DirectorySeparatorChar}stream{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))).ToList(),
-            files.FirstOrDefault(IsManifest));
+            ymtFiles,
+            shopMetaFiles,
+            streamFiles,
+            manifestPath);
     }
 
     private static bool IsManifest(string path)

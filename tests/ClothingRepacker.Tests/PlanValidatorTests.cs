@@ -53,8 +53,7 @@ public class PlanValidatorTests
 
         var errors = new PlanValidator().Validate(plan);
 
-        var error = Assert.Single(errors);
-        Assert.Contains("257 aggregate props", error);
+        Assert.Contains(errors, error => error.Contains("257 aggregate props"));
     }
 
     [Fact]

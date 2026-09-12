@@ -91,12 +91,16 @@ public class AnalyzeTests
         File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01_mp_f_gang_flags.ymt"), ymtPath);
         File.Copy(TestFixturePaths.Ymt("mp_f_freemode_01_mp_f_gang_flags.ymt.xml"), xmlPath);
 
-        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var codec = new CountingYmtCodec(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var service = new RepackerService(codec);
         var result = await service.AnalyzeAsync(Path.Combine(root, "resources"), "zz_merged_clothing_meta", new MergePlanSettings());
 
         var source = Assert.Single(result.Plan.SourceYmts);
         Assert.Equal(ymtPath, source.Path);
         Assert.DoesNotContain(result.Plan.SourceYmts, source => source.Path.Equals(xmlPath, StringComparison.OrdinalIgnoreCase));
+
+        Assert.Equal(1, codec.DecodeCounts[ymtPath]);
+        Assert.Equal(1, codec.DecodeCounts[xmlPath]);
     }
 
     [Fact]
@@ -322,7 +326,73 @@ public class AnalyzeTests
         var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
         var analyze = await service.AnalyzeAsync([first, second], Path.Combine(root, "generated"), "zz_merged_clothing_meta", new MergePlanSettings());
 
+
         Assert.Equal([Path.GetFullPath(first), Path.GetFullPath(second)], analyze.Plan.ResourceRoots);
+    }
+    [Fact]
+    public async Task AnalyzeIgnoresUnrelatedMalformedAndValidXmlFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"analyze-unrelated-xml-test-{Guid.NewGuid():N}");
+        var resource = Path.Combine(root, "resources", "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resource);
+
+        var malformedPath = Path.Combine(resource, "stream", "unrelated-malformed.xml");
+        var validPath = Path.Combine(resource, "stream", "unrelated-valid.xml");
+        await File.WriteAllTextAsync(malformedPath, "<not-closed>");
+        await File.WriteAllTextAsync(validPath, "<unrelated />");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var result = await service.AnalyzeAsync(Path.Combine(root, "resources"), "zz_merged_clothing_meta", new MergePlanSettings());
+
+        Assert.NotEmpty(result.Plan.SourceYmts);
+        Assert.DoesNotContain(result.Plan.Errors, error => error.Contains(malformedPath, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Plan.Errors, error => error.Contains(validPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task AnalyzeHonorsCancellationBetweenSourceFiles()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"analyze-cancellation-test-{Guid.NewGuid():N}");
+        var resourceRoot = Path.Combine(root, "resources", "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+        using var cancellation = new CancellationTokenSource();
+        var progress = new InlineProgress<OperationProgress>(update =>
+        {
+            if (update.Stage == "process-source" && update.Current == 1)
+            {
+                cancellation.Cancel();
+            }
+        });
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.AnalyzeAsync(
+            [resourceRoot],
+            Path.Combine(root, "generated"),
+            "zz_merged_clothing_meta",
+            new MergePlanSettings(),
+            progress,
+            cancellation.Token));
+    }
+
+    [Fact]
+    public async Task BuildRejectsOutputTargetThatEqualsSourceResource()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"build-source-collision-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var resourceRoot = Path.Combine(resources, "gang_flags");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), resourceRoot);
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(
+            [resourceRoot],
+            Path.Combine(root, "generated"),
+            "gang_flags",
+            new MergePlanSettings());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.BuildAsync(analyze.Plan, resources));
+
+        Assert.Contains("must not overlap a selected source root", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(File.Exists(Path.Combine(resourceRoot, "stream", "mp_f_freemode_01_mp_f_gang_flags.ymt")));
+        Assert.False(File.Exists(Path.Combine(resourceRoot, ".clothing-repacker-owned")));
     }
 
     private static XDocument BuildMinimalPedVariationXml(string collectionName)
@@ -350,4 +420,23 @@ public class AnalyzeTests
                                     new XElement("aTexData", new XAttribute("itemType", "CPVTextureData"))))))),
                 new XElement("compInfos", new XAttribute("itemType", "CComponentInfo")),
                 new XElement("dlcName", "hash_00000000")));
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    private sealed class CountingYmtCodec(IYmtCodec inner) : IYmtCodec
+    {
+        public Dictionary<string, int> DecodeCounts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public async Task<XDocument> DecodeToXmlAsync(string ymtPath, CancellationToken cancellationToken = default)
+        {
+            DecodeCounts[ymtPath] = DecodeCounts.GetValueOrDefault(ymtPath) + 1;
+            return await inner.DecodeToXmlAsync(ymtPath, cancellationToken);
+        }
+
+        public Task EncodeFromXmlAsync(XDocument xml, string outputYmtPath, CancellationToken cancellationToken = default)
+            => inner.EncodeFromXmlAsync(xml, outputYmtPath, cancellationToken);
+    }
 }

@@ -101,7 +101,26 @@ public sealed record BackupEntry(
     string? AppliedPath,
     string Sha256Before,
     string? Sha256After,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    string State = "applied");
+
+public sealed class BackupManifest
+{
+    public int SchemaVersion { get; init; } = 2;
+    public string RunId { get; init; } = string.Empty;
+    public string BackupRoot { get; init; } = string.Empty;
+    public List<string> SourceRoots { get; init; } = [];
+    public string GeneratedResourcesRoot { get; init; } = string.Empty;
+    public bool Completed { get; set; }
+    public List<BackupEntry> Entries { get; init; } = [];
+}
+
+public sealed record SourceFileFingerprint(
+    string Path,
+    string ResourceRoot,
+    string Kind,
+    string Sha256);
+
 
 public sealed record RestoreManifestPreview(
     string ManifestPath,
@@ -197,10 +216,9 @@ public sealed record TargetCollectionPlan(
     List<SourceIndexRange> PropRanges,
     Dictionary<int, int> ComponentCounts,
     Dictionary<int, int> PropCounts);
-
 public sealed class MergePlan
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public DateTimeOffset CreatedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     public string ResourcesRoot { get; init; } = string.Empty;
     public List<string> ResourceRoots { get; init; } = [];
@@ -223,6 +241,7 @@ public sealed class MergePlan
     public List<CreatureMetadataOutputPlan> CreatureMetadataOutputs { get; init; } = [];
     public List<SourceAlternateMetadataSummary> SourceAlternateMetadata { get; init; } = [];
     public List<AlternateMetadataOutputPlan> AlternateMetadataOutputs { get; init; } = [];
+    public List<SourceFileFingerprint> SourceFiles { get; init; } = [];
 }
 
 public sealed class MergePlanSettings
