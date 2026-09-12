@@ -13,6 +13,64 @@ public class CliResourceOptionTests
         Assert.Equal(["/tmp/a", "/tmp/b"], options.GetValues("--resource"));
     }
 
+
+    [Theory]
+    [InlineData("--unknown")]
+    [InlineData("--out")]
+    [InlineData("--overwrite=true")]
+    [InlineData("--resource", "/tmp/a", "stray")]
+    [InlineData("--plan", "/tmp/a", "--plan", "/tmp/b")]
+    public void ParserRejectsMalformedOptionSyntax(params string[] args)
+    {
+        Assert.Throws<InvalidOperationException>(() => ProgramEntry.ParseOptions(args));
+    }
+
+    [Fact]
+    public async Task InvalidAnalyzeLimitIsRejectedBeforeCommandExecution()
+    {
+        var exitCode = await ProgramEntry.RunAsync([
+            "analyze",
+            "--resources",
+            "/tmp/resources",
+            "--out",
+            "/tmp/plan.json",
+            "--max-drawables-per-component",
+            "not-a-number",
+            "--no-version-check",
+        ]);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task InvalidBuildBooleanIsRejectedBeforeCommandExecution()
+    {
+        var exitCode = await ProgramEntry.RunAsync([
+            "build",
+            "--plan",
+            "/tmp/plan.json",
+            "--out",
+            "/tmp/output",
+            "--include-debug-client",
+            "sometimes",
+            "--no-version-check",
+        ]);
+
+        Assert.Equal(1, exitCode);
+    }
+
+    [Fact]
+    public async Task CommandSpecificUnknownOptionIsRejectedBeforeCommandExecution()
+    {
+        var exitCode = await ProgramEntry.RunAsync([
+            "report",
+            "--resource",
+            "/tmp/resource",
+            "--no-version-check",
+        ]);
+
+        Assert.Equal(1, exitCode);
+    }
     [Fact]
     public async Task AnalyzeWithRepeatedResourceOptionsWritesPlanWithBothResources()
     {

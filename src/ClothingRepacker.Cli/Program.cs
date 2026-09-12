@@ -5,57 +5,118 @@ using ClothingRepacker.Core.Services;
 using ClothingRepacker.Core;
 using ClothingRepacker.CodeWalker;
 using System.Reflection;
+using System.Globalization;
 
 var exitCode = await ProgramEntry.RunAsync(args);
 return exitCode;
 
 public static class ProgramEntry
 {
+    private static readonly HashSet<string> ValueOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "--resources",
+        "--resource",
+        "--generated-root",
+        "--target-resource",
+        "--target-prefix",
+        "--female-prefix",
+        "--male-prefix",
+        "--max-drawables-per-component",
+        "--max-drawables-per-prop",
+        "--out",
+        "--plan",
+        "--backup-root",
+        "--backup-manifest",
+        "--folder",
+        "--include-ymt-xml",
+        "--include-debug-client",
+    };
+
+    private static readonly HashSet<string> FlagOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "--no-version-check",
+        "--optimize-ymt-usage",
+        "--copy-resources-to-output",
+        "--overwrite",
+    };
+
+    private static readonly HashSet<string> KnownOptions = new(
+        ValueOptions.Concat(FlagOptions),
+        StringComparer.OrdinalIgnoreCase);
+
+    private static readonly HashSet<string> Commands = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "analyze",
+        "build",
+        "apply",
+        "restore",
+        "validate",
+        "report",
+        "export-xml",
+    };
+
+    private static readonly HashSet<string> RepeatableOptions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "--resource",
+    };
+
     public static async Task<int> RunAsync(string[] args)
     {
-        var normalizedArgs = args.ToList();
-        var skipVersionCheck = normalizedArgs.RemoveAll(arg =>
-            string.Equals(arg, "--no-version-check", StringComparison.OrdinalIgnoreCase)) > 0;
-
-        if (normalizedArgs.Count == 0 || normalizedArgs[0] is "--help" or "-h" or "help")
-        {
-            PrintHelp();
-            return 0;
-        }
-
-        var command = normalizedArgs[0].ToLowerInvariant();
-        var options = ParseOptions(normalizedArgs.Skip(1).ToArray());
-        if (skipVersionCheck)
-        {
-            options.Add("--no-version-check", null);
-        }
-
-        await CheckForUpdatesAsync(options);
-        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
-
         try
         {
-            switch (command)
+            var skipVersionCheckCount = args.Count(arg =>
+                string.Equals(arg, "--no-version-check", StringComparison.OrdinalIgnoreCase));
+            if (skipVersionCheckCount > 1)
             {
-                case "analyze":
-                    return await RunAnalyzeAsync(service, options);
-                case "build":
-                    return await RunBuildAsync(service, options);
-                case "apply":
-                    return await RunApplyAsync(service, options);
-                case "restore":
-                    return await RunRestoreAsync(service, options);
-                case "validate":
-                    return await RunValidateAsync(service, options);
-                case "report":
-                    return await RunReportAsync(service, options);
-                case "export-xml":
-                    return await RunExportXmlAsync(service, options);
-                default:
-                    Console.Error.WriteLine($"Unknown command '{command}'.");
-                    PrintHelp();
-                    return 1;
+                throw new InvalidOperationException("Option '--no-version-check' may only be specified once.");
             }
+
+            var normalizedArgs = args
+                .Where(arg => !string.Equals(arg, "--no-version-check", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (normalizedArgs.Count == 0)
+            {
+                PrintHelp();
+                return 0;
+            }
+
+            if (normalizedArgs.Count == 1
+                && (string.Equals(normalizedArgs[0], "--help", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(normalizedArgs[0], "-h", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(normalizedArgs[0], "help", StringComparison.OrdinalIgnoreCase)))
+            {
+                PrintHelp();
+                return 0;
+            }
+
+            var command = normalizedArgs[0].ToLowerInvariant();
+            if (!Commands.Contains(command))
+            {
+                throw new InvalidOperationException($"Unknown command '{normalizedArgs[0]}'.");
+            }
+
+            var options = ParseOptions(normalizedArgs.Skip(1).ToArray());
+            if (skipVersionCheckCount == 1)
+            {
+                options.Add("--no-version-check", null);
+            }
+
+            ValidateCommandOptions(command, options);
+            await CheckForUpdatesAsync(options);
+            var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+
+            return command switch
+            {
+                "analyze" => await RunAnalyzeAsync(service, options),
+                "build" => await RunBuildAsync(service, options),
+                "apply" => await RunApplyAsync(service, options),
+                "restore" => await RunRestoreAsync(service, options),
+                "validate" => await RunValidateAsync(service, options),
+                "report" => await RunReportAsync(service, options),
+                "export-xml" => await RunExportXmlAsync(service, options),
+                _ => throw new InvalidOperationException($"Unknown command '{command}'."),
+            };
         }
         catch (Exception ex)
         {
@@ -70,7 +131,6 @@ public static class ProgramEntry
         var targetResource = options.GetValueOrDefault("--target-resource") ?? "zz_merged_clothing_meta";
         var targetPrefix = options.GetValueOrDefault("--target-prefix") ?? "merged";
         var outPath = Required(options, "--out");
-        var legacyMaxDrawablesPerType = ParseNullableInt(options.GetValueOrDefault("--max-drawables-per-type"));
         var settings = new MergePlanSettings
         {
             TargetPrefix = targetPrefix,
@@ -78,10 +138,10 @@ public static class ProgramEntry
             MalePrefix = options.GetValueOrDefault("--male-prefix") ?? $"{targetPrefix}_m",
             MaxDrawablesPerComponent = ParseInt(
                 options.GetValueOrDefault("--max-drawables-per-component"),
-                legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerComponent),
+                ClothingConstants.DefaultMaxDrawablesPerComponent),
             MaxDrawablesPerProp = ParseInt(
                 options.GetValueOrDefault("--max-drawables-per-prop"),
-                legacyMaxDrawablesPerType ?? ClothingConstants.DefaultMaxDrawablesPerProp),
+                ClothingConstants.DefaultMaxDrawablesPerProp),
             OptimizeYmtUsage = options.ContainsKey("--optimize-ymt-usage"),
         };
 
@@ -313,23 +373,258 @@ Analyze options:
         for (var i = 0; i < args.Length; i++)
         {
             var arg = args[i];
-            if (!arg.StartsWith('-'))
+            if (!arg.StartsWith("--", StringComparison.Ordinal))
             {
+                throw new InvalidOperationException($"Unexpected positional argument '{arg}'.");
+            }
+
+            var separator = arg.IndexOf('=');
+            if (separator >= 0)
+            {
+                var optionName = arg[..separator];
+                if (KnownOptions.Contains(optionName))
+                {
+                    throw new InvalidOperationException($"Option '{optionName}' does not accept an attached value.");
+                }
+
+                throw new InvalidOperationException($"Unknown option '{optionName}'.");
+            }
+
+            if (!KnownOptions.Contains(arg))
+            {
+                throw new InvalidOperationException($"Unknown option '{arg}'.");
+            }
+
+            if (options.ContainsKey(arg) && !RepeatableOptions.Contains(arg))
+            {
+                throw new InvalidOperationException($"Option '{arg}' may only be specified once.");
+            }
+
+            if (ValueOptions.Contains(arg))
+            {
+                if (i + 1 >= args.Length || args[i + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException($"Option '{arg}' requires a value.");
+                }
+
+                options.Add(arg, args[++i]);
                 continue;
             }
 
-            if (i + 1 < args.Length && !args[i + 1].StartsWith('-'))
+            if (i + 1 < args.Length && !args[i + 1].StartsWith("-", StringComparison.Ordinal))
             {
-                options.Add(arg, args[i + 1]);
-                i++;
+                throw new InvalidOperationException($"Flag option '{arg}' does not accept a value.");
             }
-            else
+
+            options.Add(arg, null);
+        }
+
+        ValidateLimit(options, "--max-drawables-per-component");
+        ValidateLimit(options, "--max-drawables-per-prop");
+        ValidateBoolean(options, "--include-ymt-xml");
+        ValidateBoolean(options, "--include-debug-client");
+
+        return options;
+    }
+
+    private static void ValidateCommandOptions(string command, CliOptions options)
+    {
+        var allowed = command switch
+        {
+            "analyze" => Allowed(
+                "--no-version-check",
+                "--resources",
+                "--resource",
+                "--generated-root",
+                "--target-resource",
+                "--target-prefix",
+                "--female-prefix",
+                "--male-prefix",
+                "--max-drawables-per-component",
+                "--max-drawables-per-prop",
+                "--out",
+                "--optimize-ymt-usage"),
+            "build" => Allowed(
+                "--no-version-check",
+                "--plan",
+                "--out",
+                "--include-ymt-xml",
+                "--include-debug-client"),
+            "apply" => Allowed(
+                "--no-version-check",
+                "--plan",
+                "--backup-root",
+                "--copy-resources-to-output",
+                "--include-ymt-xml",
+                "--include-debug-client"),
+            "restore" => Allowed(
+                "--no-version-check",
+                "--backup-manifest"),
+            "validate" => Allowed(
+                "--no-version-check",
+                "--plan",
+                "--resources",
+                "--resource",
+                "--generated-root"),
+            "report" => Allowed(
+                "--no-version-check",
+                "--plan",
+                "--out"),
+            "export-xml" => Allowed(
+                "--no-version-check",
+                "--folder",
+                "--overwrite"),
+            _ => throw new InvalidOperationException($"Unknown command '{command}'."),
+        };
+
+        foreach (var name in options.Names.OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!allowed.Contains(name))
             {
-                options.Add(arg, null);
+                throw new InvalidOperationException($"Option '{name}' is not valid for command '{command}'.");
             }
         }
 
-        return options;
+        ValidateNonEmptyValues(options);
+        switch (command)
+        {
+            case "analyze":
+                ValidateAnalyzeOptions(options);
+                break;
+            case "build":
+                Required(options, "--plan");
+                Required(options, "--out");
+                ValidateBoolean(options, "--include-ymt-xml");
+                ValidateBoolean(options, "--include-debug-client");
+                break;
+            case "apply":
+                Required(options, "--plan");
+                Required(options, "--backup-root");
+                ValidateBoolean(options, "--include-ymt-xml");
+                ValidateBoolean(options, "--include-debug-client");
+                break;
+            case "restore":
+                Required(options, "--backup-manifest");
+                break;
+            case "validate":
+                ValidateValidateOptions(options);
+                break;
+            case "report":
+                Required(options, "--plan");
+                break;
+            case "export-xml":
+                Required(options, "--folder");
+                break;
+        }
+    }
+
+    private static HashSet<string> Allowed(params string[] names)
+        => new(names, StringComparer.OrdinalIgnoreCase);
+
+    private static void ValidateAnalyzeOptions(CliOptions options)
+    {
+        Required(options, "--out");
+        ValidateLimit(options, "--max-drawables-per-component");
+        ValidateLimit(options, "--max-drawables-per-prop");
+
+        var resources = options.ContainsKey("--resources");
+        var resourceFolders = options.GetValues("--resource");
+        if (resources && resourceFolders.Count > 0)
+        {
+            throw new InvalidOperationException("Use either --resources <parent> or repeated --resource <folder>, not both.");
+        }
+
+        if (!resources && resourceFolders.Count == 0)
+        {
+            throw new InvalidOperationException("Missing required option --resources or --resource.");
+        }
+
+        if (resourceFolders.Count > 0 && !options.ContainsKey("--generated-root"))
+        {
+            throw new InvalidOperationException("--generated-root is required when using --resource.");
+        }
+
+        if (resources && options.ContainsKey("--generated-root"))
+        {
+            throw new InvalidOperationException("--generated-root is only valid with --resource.");
+        }
+    }
+
+    private static void ValidateValidateOptions(CliOptions options)
+    {
+        var hasPlan = options.ContainsKey("--plan");
+        var hasResources = options.ContainsKey("--resources");
+        var resourceFolders = options.GetValues("--resource");
+        var inputModes = (hasPlan ? 1 : 0) + (hasResources ? 1 : 0) + (resourceFolders.Count > 0 ? 1 : 0);
+        if (inputModes == 0)
+        {
+            throw new InvalidOperationException("validate requires --plan, --resources, or at least one --resource.");
+        }
+
+        if (inputModes > 1)
+        {
+            throw new InvalidOperationException("validate accepts exactly one input mode: --plan, --resources, or --resource.");
+        }
+
+        if (hasPlan)
+        {
+            Required(options, "--plan");
+            return;
+        }
+
+        if (hasResources)
+        {
+            Required(options, "--resources");
+            if (options.ContainsKey("--generated-root"))
+            {
+                throw new InvalidOperationException("--generated-root is only valid with --resource.");
+            }
+
+            return;
+        }
+
+        if (!options.ContainsKey("--generated-root"))
+        {
+            throw new InvalidOperationException("--generated-root is required when using --resource.");
+        }
+
+        Required(options, "--generated-root");
+    }
+
+    private static void ValidateNonEmptyValues(CliOptions options)
+    {
+        foreach (var name in options.Names.Where(ValueOptions.Contains))
+        {
+            foreach (var value in options.GetValues(name))
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    throw new InvalidOperationException($"Option '{name}' requires a non-empty value.");
+                }
+            }
+        }
+    }
+
+    private static void ValidateLimit(CliOptions options, string name)
+    {
+        if (!options.TryGetValue(name, out var value))
+        {
+            return;
+        }
+
+        var parsed = ParseInt(value, fallback: 0);
+        if (parsed is < 1 or > 255)
+        {
+            throw new InvalidOperationException($"Option '{name}' must be an integer from 1 through 255.");
+        }
+    }
+
+    private static void ValidateBoolean(CliOptions options, string name)
+    {
+        if (options.TryGetValue(name, out var value))
+        {
+            ParseBool(value, fallback: true);
+        }
     }
 
     private static string Required(CliOptions options, string name)
@@ -338,13 +633,34 @@ Analyze options:
             : throw new InvalidOperationException($"Missing required option {name}.");
 
     private static int ParseInt(string? value, int fallback)
-        => int.TryParse(value, out var parsed) ? parsed : fallback;
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
 
-    private static int? ParseNullableInt(string? value)
-        => int.TryParse(value, out var parsed) ? parsed : null;
+        if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"Invalid integer value '{value}'.");
+    }
 
     private static bool ParseBool(string? value, bool fallback)
-        => bool.TryParse(value, out var parsed) ? parsed : fallback;
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        if (bool.TryParse(value, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new InvalidOperationException($"Invalid Boolean value '{value}'. Expected true or false.");
+    }
 
     private static IProgress<OperationProgress> CreateConsoleProgress(ConsoleProgressWriter writer)
         => new Progress<OperationProgress>(progress => writer.Write(FormatProgress(progress)));
@@ -519,6 +835,9 @@ public sealed class CliOptions
     public bool ContainsKey(string name)
         => _values.ContainsKey(name);
 
+    public IReadOnlyCollection<string> Names
+        => _values.Keys;
+
     public bool TryGetValue(string name, out string? value)
     {
         if (_values.TryGetValue(name, out var values) && values.Count > 0)
@@ -536,6 +855,6 @@ public sealed class CliOptions
 
     public IReadOnlyList<string> GetValues(string name)
         => _values.TryGetValue(name, out var values)
-            ? values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!).ToList()
+            ? values.Select(value => value ?? string.Empty).ToList()
             : [];
 }
