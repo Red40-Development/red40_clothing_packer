@@ -47,8 +47,35 @@ public sealed class RepackMapControl : Control
         "#DD6B20",
         "#3182CE",
     ];
+    private static readonly IReadOnlyList<IBrush> PaletteBrushes = Palette
+        .Select(Brush.Parse)
+        .ToArray();
 
-    private readonly List<(Rect Rect, YmtRepackSegment Segment)> _hitRegions = [];
+    private IReadOnlyList<(Rect Rect, YmtRepackSegment Segment)> _hitRegions = [];
+    private LayoutCache? _layoutCache;
+    private sealed record TextLayout(FormattedText Text, Point Point);
+
+    private sealed record SegmentLayout(Rect Rect, YmtRepackSegment Segment, IBrush Brush);
+
+    private sealed record LaneLayout(TextLayout Label, Rect Rect, IReadOnlyList<SegmentLayout> Segments);
+
+    private sealed record TargetLayout(TextLayout Header, IReadOnlyList<LaneLayout> Lanes);
+
+    private sealed record LegendLayout(Rect Swatch, IBrush Brush, TextLayout Label);
+
+    private sealed record MetadataLayout(TextLayout Status, TextLayout? Output);
+
+    private sealed class LayoutCache
+    {
+        public required Size Size { get; init; }
+        public required IReadOnlyDictionary<string, IBrush> SourceBrushes { get; init; }
+        public required TextLayout LegendHeader { get; init; }
+        public required IReadOnlyList<LegendLayout> Legend { get; init; }
+        public required IReadOnlyList<TargetLayout> Targets { get; init; }
+        public required TextLayout? MetadataHeader { get; init; }
+        public required IReadOnlyList<MetadataLayout> Metadata { get; init; }
+        public required IReadOnlyList<(Rect Rect, YmtRepackSegment Segment)> HitRegions { get; init; }
+    }
     private YmtRepackSegment? _hoveredSegment;
 
     public RepackMapControl()
@@ -61,17 +88,28 @@ public sealed class RepackMapControl : Control
         get => GetValue(ReportProperty);
         set => SetValue(ReportProperty, value);
     }
-
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
         if (change.Property == ReportProperty)
         {
             _hoveredSegment = null;
-            _hitRegions.Clear();
+            _hitRegions = [];
+            _layoutCache = null;
             InvalidateMeasure();
             InvalidateVisual();
         }
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        if (_layoutCache is not null && _layoutCache.Size != finalSize)
+        {
+            _layoutCache = null;
+            _hitRegions = [];
+        }
+
+        return base.ArrangeOverride(finalSize);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -79,13 +117,12 @@ public sealed class RepackMapControl : Control
         var width = double.IsInfinity(availableSize.Width)
             ? MinimumMapWidth
             : Math.Max(MinimumMapWidth, availableSize.Width);
-        return new Size(width, EstimateHeight());
+        return new Size(width, EstimateHeight(width));
     }
 
     public override void Render(DrawingContext context)
     {
         base.Render(context);
-        _hitRegions.Clear();
 
         var bounds = new Rect(Bounds.Size);
         context.FillRectangle(BackgroundBrush, bounds);
@@ -96,47 +133,43 @@ public sealed class RepackMapControl : Control
             return;
         }
 
-        var sourceBrushes = BuildSourceBrushes(report);
-        var y = MarginSize;
-        y = DrawLegend(context, report, sourceBrushes, y, Math.Max(MinimumMapWidth, bounds.Width));
-        var mapLeft = MarginSize + LabelWidth;
-        var mapWidth = Math.Max(420, Math.Max(MinimumMapWidth, bounds.Width) - mapLeft - MarginSize);
+        var layout = GetLayout(report, bounds.Size);
+        _hitRegions = layout.HitRegions;
 
-        foreach (var target in report.Targets)
+        DrawText(context, layout.LegendHeader);
+        foreach (var legend in layout.Legend)
         {
-            DrawText(context, $"{target.FullCollectionName} -> {target.OutputYmtPath}", new Point(MarginSize, y), 13, TextBrush);
-            y += TargetHeaderHeight;
-
-            foreach (var lane in target.Lanes)
-            {
-                var laneLabel = $"{KindLabel(lane.Kind)} {lane.SlotId} {lane.SlotName}  {lane.UsedCount}/{lane.Capacity}";
-                DrawText(context, laneLabel, new Point(MarginSize, y - 1), 12, MutedTextBrush);
-                var laneRect = new Rect(mapLeft, y, mapWidth, LaneHeight);
-                context.DrawRectangle(LaneBackgroundBrush, LaneBorderPen, laneRect, 2, 2);
-
-                foreach (var segment in lane.Segments)
-                {
-                    var segmentRect = SegmentRect(laneRect, segment, lane.Capacity);
-                    if (segmentRect.Width <= 0)
-                    {
-                        continue;
-                    }
-
-                    var brush = segment.IsFree
-                        ? FreeBrush
-                        : sourceBrushes.GetValueOrDefault(SourceKey(segment), Brush.Parse(Palette[0]));
-                    var pen = Equals(segment, _hoveredSegment) ? HighlightPen : SegmentBorderPen;
-                    context.DrawRectangle(brush, pen, segmentRect, 1.5, 1.5);
-                    _hitRegions.Add((segmentRect, segment));
-                }
-
-                y += LaneHeight + LaneGap;
-            }
-
-            y += TargetGap;
+            context.DrawRectangle(legend.Brush, null, legend.Swatch, 2, 2);
+            DrawText(context, legend.Label);
         }
 
-        y = DrawCreatureMetadata(context, report, y);
+        foreach (var target in layout.Targets)
+        {
+            DrawText(context, target.Header);
+            foreach (var lane in target.Lanes)
+            {
+                DrawText(context, lane.Label);
+                context.DrawRectangle(LaneBackgroundBrush, LaneBorderPen, lane.Rect, 2, 2);
+                foreach (var segment in lane.Segments)
+                {
+                    var pen = Equals(segment.Segment, _hoveredSegment) ? HighlightPen : SegmentBorderPen;
+                    context.DrawRectangle(segment.Brush, pen, segment.Rect, 1.5, 1.5);
+                }
+            }
+        }
+
+        if (layout.MetadataHeader is not null)
+        {
+            DrawText(context, layout.MetadataHeader);
+            foreach (var metadata in layout.Metadata)
+            {
+                DrawText(context, metadata.Status);
+                if (metadata.Output is not null)
+                {
+                    DrawText(context, metadata.Output);
+                }
+            }
+        }
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -162,14 +195,15 @@ public sealed class RepackMapControl : Control
         InvalidateVisual();
     }
 
-    private double EstimateHeight()
+    private double EstimateHeight(double width)
     {
         if (Report is not { } report)
         {
             return 80;
         }
 
-        var legendRows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / 2.0));
+        var columns = LegendColumnCount(width);
+        var legendRows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / (double)columns));
         var targetHeight = report.Targets.Sum(target => TargetHeaderHeight + target.Lanes.Count * (LaneHeight + LaneGap) + TargetGap);
         var metadataHeight = report.CreatureMetadataTargets.Count == 0
             ? 0
@@ -177,17 +211,21 @@ public sealed class RepackMapControl : Control
         return MarginSize * 2 + TargetHeaderHeight + legendRows * LegendRowHeight + TargetGap + targetHeight + metadataHeight;
     }
 
-    private static double DrawLegend(
-        DrawingContext context,
-        YmtRepackReport report,
-        IReadOnlyDictionary<string, IBrush> sourceBrushes,
-        double y,
-        double width)
+    private LayoutCache GetLayout(YmtRepackReport report, Size size)
     {
-        DrawText(context, "Source legend", new Point(MarginSize, y), 13, TextBrush);
+        if (_layoutCache is not null && _layoutCache.Size == size)
+        {
+            return _layoutCache;
+        }
+
+        var width = Math.Max(MinimumMapWidth, size.Width);
+        var sourceBrushes = BuildSourceBrushes(report);
+        var hitRegions = new List<(Rect Rect, YmtRepackSegment Segment)>();
+        var legend = new List<LegendLayout>();
+        var y = MarginSize;
+        var legendHeader = CreateText("Source legend", new Point(MarginSize, y), 13, TextBrush);
         y += TargetHeaderHeight;
-        var columns = Math.Max(1, (int)((width - MarginSize * 2) / LegendColumnWidth));
-        columns = Math.Min(columns, 3);
+        var columns = LegendColumnCount(width);
         for (var index = 0; index < report.Sources.Count; index++)
         {
             var source = report.Sources[index];
@@ -196,63 +234,114 @@ public sealed class RepackMapControl : Control
             var x = MarginSize + column * LegendColumnWidth;
             var itemY = y + row * LegendRowHeight;
             var key = SourceKey(source.Resource, source.YmtPath);
-            var swatchRect = new Rect(x, itemY + 3, 12, 12);
-            context.DrawRectangle(sourceBrushes.GetValueOrDefault(key, Brush.Parse(Palette[0])), null, swatchRect, 2, 2);
-            DrawText(context, $"{source.Resource} | {Path.GetFileName(source.YmtPath)}", new Point(x + 18, itemY), 11, MutedTextBrush);
+            legend.Add(new LegendLayout(
+                new Rect(x, itemY + 3, 12, 12),
+                sourceBrushes.GetValueOrDefault(key) ?? PaletteBrushes[0],
+                CreateText($"{source.Resource} | {Path.GetFileName(source.YmtPath)}", new Point(x + 18, itemY), 11, MutedTextBrush)));
         }
 
-        var rows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / (double)columns));
-        return y + rows * LegendRowHeight + TargetGap;
-    }
-
-    private static double DrawCreatureMetadata(DrawingContext context, YmtRepackReport report, double y)
-    {
-        if (report.CreatureMetadataTargets.Count == 0)
+        var legendRows = Math.Max(1, (int)Math.Ceiling(report.Sources.Count / (double)columns));
+        y += legendRows * LegendRowHeight + TargetGap;
+        var mapLeft = MarginSize + LabelWidth;
+        var mapWidth = Math.Max(420, width - mapLeft - MarginSize);
+        var targets = new List<TargetLayout>();
+        foreach (var target in report.Targets)
         {
-            return y;
-        }
-
-        DrawText(context, "Creature metadata", new Point(MarginSize, y), 13, TextBrush);
-        y += TargetHeaderHeight;
-        foreach (var target in report.CreatureMetadataTargets)
-        {
-            var status = target.IsUnnecessaryOutput
-                ? "UNNECESSARY OUTPUT"
-                : target.IsMissingOutput
-                    ? "MISSING OUTPUT"
-                    : target.IsRequired
-                        ? "required"
-                        : "not required";
-            var brush = target.IsUnnecessaryOutput
-                ? UnnecessaryMetadataBrush
-                : target.IsMissingOutput
-                    ? MissingMetadataBrush
-                    : target.IsRequired
-                        ? RequiredMetadataBrush
-                        : MutedTextBrush;
-            var output = target.OutputName is null ? "no output" : target.OutputName;
-            var source = target.SourceMetadataPaths.Count == 0
-                ? "no source metadata"
-                : $"{target.SourceMetadataPaths.Count} source metadata file(s)";
-            var sourceYmts = target.SourceYmtPaths.Count == 0
-                ? string.Empty
-                : $" | YMTs: {string.Join(", ", target.SourceYmtPaths.Select(Path.GetFileName))}";
-            var repair = target.HasRepairHints ? " + repair hints" : string.Empty;
-            DrawText(
-                context,
-                $"{target.TargetFullCollection}  {status}  |  {output}  |  {source}{sourceYmts}{repair}",
-                new Point(MarginSize, y),
-                12,
-                brush);
-            if (!string.IsNullOrWhiteSpace(target.OutputYmtPath))
+            var header = CreateText($"{target.FullCollectionName} -> {target.OutputYmtPath}", new Point(MarginSize, y), 13, TextBrush);
+            y += TargetHeaderHeight;
+            var lanes = new List<LaneLayout>();
+            foreach (var lane in target.Lanes)
             {
-                DrawText(context, $"Output: {target.OutputYmtPath}", new Point(MarginSize + 18, y + 15), 10, MutedTextBrush);
+                var laneRect = new Rect(mapLeft, y, mapWidth, LaneHeight);
+                var segments = new List<SegmentLayout>();
+                var label = CreateText(
+                    $"{KindLabel(lane.Kind)} {lane.SlotId} {lane.SlotName}  {lane.UsedCount}/{lane.Capacity}",
+                    new Point(MarginSize, y - 1),
+                    12,
+                    MutedTextBrush);
+                foreach (var segment in lane.Segments)
+                {
+                    var segmentRect = SegmentRect(laneRect, segment, lane.Capacity);
+                    if (segmentRect.Width <= 0)
+                    {
+                        continue;
+                    }
+
+                    var brush = segment.IsFree
+                        ? FreeBrush
+                        : sourceBrushes.GetValueOrDefault(SourceKey(segment)) ?? PaletteBrushes[0];
+                    segments.Add(new SegmentLayout(segmentRect, segment, brush));
+                    hitRegions.Add((segmentRect, segment));
+                }
+
+                lanes.Add(new LaneLayout(label, laneRect, segments));
+                y += LaneHeight + LaneGap;
             }
 
-            y += MetadataRowHeight;
+            targets.Add(new TargetLayout(header, lanes));
+            y += TargetGap;
         }
 
-        return y + TargetGap;
+        TextLayout? metadataHeader = null;
+        var metadata = new List<MetadataLayout>();
+        if (report.CreatureMetadataTargets.Count > 0)
+        {
+            metadataHeader = CreateText("Creature metadata", new Point(MarginSize, y), 13, TextBrush);
+            y += TargetHeaderHeight;
+            foreach (var target in report.CreatureMetadataTargets)
+            {
+                var status = target.IsUnnecessaryOutput
+                    ? "UNNECESSARY OUTPUT"
+                    : target.IsMissingOutput
+                        ? "MISSING OUTPUT"
+                        : target.IsRequired
+                            ? "required"
+                            : "not required";
+                var brush = target.IsUnnecessaryOutput
+                    ? UnnecessaryMetadataBrush
+                    : target.IsMissingOutput
+                        ? MissingMetadataBrush
+                        : target.IsRequired
+                            ? RequiredMetadataBrush
+                            : MutedTextBrush;
+                var output = target.OutputName is null ? "no output" : target.OutputName;
+                var source = target.SourceMetadataPaths.Count == 0
+                    ? "no source metadata"
+                    : $"{target.SourceMetadataPaths.Count} source metadata file(s)";
+                var sourceYmts = target.SourceYmtPaths.Count == 0
+                    ? string.Empty
+                    : $" | YMTs: {string.Join(", ", target.SourceYmtPaths.Select(Path.GetFileName))}";
+                var repair = target.HasRepairHints ? " + repair hints" : string.Empty;
+                metadata.Add(new MetadataLayout(
+                    CreateText(
+                        $"{target.TargetFullCollection}  {status}  |  {output}  |  {source}{sourceYmts}{repair}",
+                        new Point(MarginSize, y),
+                        12,
+                        brush),
+                    string.IsNullOrWhiteSpace(target.OutputYmtPath)
+                        ? null
+                        : CreateText($"Output: {target.OutputYmtPath}", new Point(MarginSize + 18, y + 15), 10, MutedTextBrush)));
+                y += MetadataRowHeight;
+            }
+        }
+
+        return _layoutCache = new LayoutCache
+        {
+            Size = size,
+            SourceBrushes = sourceBrushes,
+            LegendHeader = legendHeader,
+            Legend = legend,
+            Targets = targets,
+            MetadataHeader = metadataHeader,
+            Metadata = metadata,
+            HitRegions = hitRegions,
+        };
+    }
+
+    private static int LegendColumnCount(double width)
+    {
+        var columns = Math.Max(1, (int)((Math.Max(MinimumMapWidth, width) - MarginSize * 2) / LegendColumnWidth));
+        return Math.Min(columns, 3);
     }
 
     private static Rect SegmentRect(Rect laneRect, YmtRepackSegment segment, int capacity)
@@ -280,7 +369,7 @@ public sealed class RepackMapControl : Control
         for (var index = 0; index < report.Sources.Count; index++)
         {
             var source = report.Sources[index];
-            result[SourceKey(source.Resource, source.YmtPath)] = Brush.Parse(Palette[index % Palette.Length]);
+            result[SourceKey(source.Resource, source.YmtPath)] = PaletteBrushes[index % PaletteBrushes.Count];
         }
 
         foreach (var segment in report.Targets.SelectMany(target => target.Lanes).SelectMany(lane => lane.UsedSegments))
@@ -288,7 +377,7 @@ public sealed class RepackMapControl : Control
             var key = SourceKey(segment);
             if (!result.ContainsKey(key))
             {
-                result[key] = Brush.Parse(Palette[result.Count % Palette.Length]);
+                result[key] = PaletteBrushes[result.Count % PaletteBrushes.Count];
             }
         }
 
@@ -318,15 +407,20 @@ public sealed class RepackMapControl : Control
     private static string SourceKey(string resource, string ymtPath)
         => $"{resource}\n{ymtPath}";
 
+    private static TextLayout CreateText(string text, Point point, double size, IBrush brush)
+        => new(
+            new FormattedText(
+                text,
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                new Typeface("Inter", FontStyle.Normal, FontWeight.Normal, FontStretch.Normal),
+                size,
+                brush),
+            point);
+
+    private static void DrawText(DrawingContext context, TextLayout text)
+        => context.DrawText(text.Text, text.Point);
+
     private static void DrawText(DrawingContext context, string text, Point point, double size, IBrush brush)
-    {
-        var formatted = new FormattedText(
-            text,
-            CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight,
-            new Typeface("Inter", FontStyle.Normal, FontWeight.Normal, FontStretch.Normal),
-            size,
-            brush);
-        context.DrawText(formatted, point);
-    }
+        => DrawText(context, CreateText(text, point, size, brush));
 }
