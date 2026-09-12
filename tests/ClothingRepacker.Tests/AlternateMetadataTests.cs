@@ -1,6 +1,7 @@
 using System.Xml.Linq;
 using ClothingRepacker.CodeWalker;
 using ClothingRepacker.Core.Codecs;
+using ClothingRepacker.Core.Planning;
 using ClothingRepacker.Core.Models;
 using ClothingRepacker.Core.Services;
 
@@ -42,6 +43,110 @@ public class AlternateMetadataTests
         Assert.DoesNotContain(firstPersonXml.Descendants("assetName"), element => element.Value.Contains("mp_f_zdwcp1", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("data_file 'ALTERNATE_VARIATIONS_FILE' 'data/pedalternatevariations.meta'", manifest);
         Assert.Contains("data_file 'PED_FIRST_PERSON_ALTERNATE_DATA' 'data/first_person_alternates.meta'", manifest);
+    }
+
+    [Fact]
+    public void AlternateMetadataPreservesUnrelatedAndMixedEntriesAndDeduplicatesFinalEntries()
+    {
+        var builder = new AlternateMetadataBuilder();
+        var mapped = new DrawableMapping(
+            "pack",
+            "stream/source.ymt",
+            "pack_a",
+            "mp_f_freemode_01_pack_a",
+            "merged_f_001",
+            "mp_f_freemode_01_merged_f_001",
+            "mp_f_freemode_01",
+            11,
+            1,
+            4);
+
+        var mappedSwitch = new XElement(
+            "Item",
+            new XElement("dlcNameHash", "pack_a"),
+            new XElement("component", new XAttribute("value", 11)),
+            new XElement("index", new XAttribute("value", 1)),
+            new XElement("alt", new XAttribute("value", 3)),
+            new XElement("sourceAssets"));
+        var mixedSwitch = new XElement(
+            "Item",
+            new XElement("dlcNameHash", "unrelated"),
+            new XElement("component", new XAttribute("value", 5)),
+            new XElement("index", new XAttribute("value", 0)),
+            new XElement(
+                "sourceAssets",
+                new XElement(
+                    "Item",
+                    new XElement("dlcNameHash", "pack_a"),
+                    new XElement("component", new XAttribute("value", 11)),
+                    new XElement("index", new XAttribute("value", 1))),
+                new XElement(
+                    "Item",
+                    new XElement("dlcNameHash", "external"),
+                    new XElement("component", new XAttribute("value", 5)),
+                    new XElement("index", new XAttribute("value", 8)))));
+        var source = new XDocument(
+            new XElement(
+                "CAlternateVariations",
+                new XElement(
+                    "peds",
+                    new XElement(
+                        "Item",
+                        new XElement("name", "mp_f_freemode_01"),
+                        new XElement("switches", mappedSwitch, mixedSwitch)))));
+
+        var result = builder.BuildAlternateVariationsXml([source, source], [mapped]);
+        var switches = result.Descendants("switches").Single().Elements("Item").ToList();
+
+        Assert.Equal(2, switches.Count);
+        Assert.Contains(switches, item => item.Element("dlcNameHash")?.Value == "merged_f_001"
+            && item.Element("index")?.Attribute("value")?.Value == "4");
+
+        var mixed = Assert.Single(switches, item => item.Element("dlcNameHash")?.Value == "unrelated");
+        var mixedAssets = mixed.Element("sourceAssets")!.Elements("Item").ToList();
+        Assert.Equal(2, mixedAssets.Count);
+        Assert.Contains(mixedAssets, item => item.Element("dlcNameHash")?.Value == "merged_f_001"
+            && item.Element("index")?.Attribute("value")?.Value == "4");
+        Assert.Contains(mixedAssets, item => item.Element("dlcNameHash")?.Value == "external");
+    }
+
+    [Fact]
+    public void FirstPersonMetadataPreservesUnrelatedEntriesAndDeduplicatesFinalEntries()
+    {
+        var builder = new AlternateMetadataBuilder();
+        var mapped = new DrawableMapping(
+            "pack",
+            "stream/source.ymt",
+            "pack_a",
+            "mp_f_freemode_01_pack_a",
+            "merged_f_001",
+            "mp_f_freemode_01_merged_f_001",
+            "mp_f_freemode_01",
+            11,
+            1,
+            4);
+        var source = new XDocument(
+            new XElement(
+                "FirstPersonAlternateData",
+                new XElement(
+                    "alternates",
+                    new XElement(
+                        "Item",
+                        new XElement("assetName", "MP_F_Freemode_01_pack_a/jbib_001_u"),
+                        new XElement("alternate", new XAttribute("value", 1))),
+                    new XElement(
+                        "Item",
+                        new XElement("assetName", "MP_Freemode_01_unrelated/jbib_001_u"),
+                        new XElement("alternate", new XAttribute("value", 1))))));
+
+        var result = builder.BuildFirstPersonAlternatesXml([source, source], [mapped]);
+        var entries = result.Descendants("alternates").Single().Elements("Item").ToList();
+
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, item => item.Element("assetName")?.Value
+            == "mp_f_freemode_01_merged_f_001/jbib_004_u");
+        Assert.Contains(entries, item => item.Element("assetName")?.Value
+            == "MP_Freemode_01_unrelated/jbib_001_u");
     }
 
     private static XDocument BuildPedVariation(string collectionName)

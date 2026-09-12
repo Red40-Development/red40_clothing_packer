@@ -33,11 +33,7 @@ public sealed class AlternateMetadataBuilder
 
                 foreach (var item in XmlHelpers.Items(ped.Element("switches")))
                 {
-                    if (!TryRemapAlternateVariationSwitch(item, mappings, out var remapped))
-                    {
-                        continue;
-                    }
-
+                    var remapped = RemapAlternateVariationSwitch(item, mappings);
                     var switches = GetOrCreate(switchesByPed, pedName);
                     var seen = GetOrCreate(seenByPed, pedName);
                     AddUnique(switches, seen, remapped);
@@ -71,14 +67,14 @@ public sealed class AlternateMetadataBuilder
 
             foreach (var item in XmlHelpers.Items(sourceXml.Root.Element("alternates")))
             {
-                var assetName = item.Element("assetName")?.Value.Trim();
-                if (assetName is null || !TryRemapFirstPersonAssetName(assetName, mappings, out var remappedAssetName))
+                var clone = new XElement(item);
+                var assetName = clone.Element("assetName")?.Value.Trim();
+                if (assetName is not null
+                    && TryRemapFirstPersonAssetName(assetName, mappings, out var remappedAssetName))
                 {
-                    continue;
+                    clone.Element("assetName")!.Value = remappedAssetName;
                 }
 
-                var clone = new XElement(item);
-                clone.Element("assetName")!.Value = remappedAssetName;
                 AddUnique(alternates, seen, clone);
             }
         }
@@ -89,33 +85,25 @@ public sealed class AlternateMetadataBuilder
                 new XElement("alternates", alternates)));
     }
 
-    private static bool TryRemapAlternateVariationSwitch(
+    private static XElement RemapAlternateVariationSwitch(
         XElement source,
-        IReadOnlyDictionary<string, DrawableMapping> mappings,
-        out XElement remapped)
+        IReadOnlyDictionary<string, DrawableMapping> mappings)
     {
-        remapped = new XElement(source);
-        var remappedSwitch = TryRemapAlternateVariationAsset(remapped, mappings);
-        var sourceAssets = remapped.Element("sourceAssets");
-        var hadSourceAssets = sourceAssets?.Elements("Item").Any() == true;
-        var remappedSourceAssets = new List<XElement>();
+        var remapped = new XElement(source);
+        TryRemapAlternateVariationAsset(remapped, mappings);
 
+        var sourceAssets = remapped.Element("sourceAssets");
         if (sourceAssets is not null)
         {
-            foreach (var asset in sourceAssets.Elements("Item"))
+            foreach (var asset in sourceAssets.Elements("Item").ToList())
             {
-                var remappedAsset = new XElement(asset);
-                if (TryRemapAlternateVariationAsset(remappedAsset, mappings))
-                {
-                    remappedSourceAssets.Add(remappedAsset);
-                }
+                TryRemapAlternateVariationAsset(asset, mappings);
             }
-
-            sourceAssets.ReplaceNodes(remappedSourceAssets);
         }
 
-        return remappedSwitch || (hadSourceAssets && remappedSourceAssets.Count > 0);
+        return remapped;
     }
+
 
     private static bool TryRemapAlternateVariationAsset(XElement item, IReadOnlyDictionary<string, DrawableMapping> mappings)
     {
