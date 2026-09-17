@@ -50,6 +50,28 @@ public partial class MainWindow : Window
             ViewModel?.AddResourceFolders(paths);
         }
     }
+    private async void CreateDiagnosticBundle_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not { CanCreateDiagnosticBundle: true } vm)
+        {
+            return;
+        }
+
+        var suggestedName = $"red40-diagnostics-{DateTime.UtcNow:yyyyMMdd-HHmmss}.zip";
+        var path = await SaveFileAsync("Save diagnostic bundle", suggestedName, "ZIP archives", ["zip"]);
+        if (path is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            path += ".zip";
+        }
+
+        await vm.CreateDiagnosticBundleAsync(path);
+    }
+
 
     private void RemoveResource_Click(object? sender, RoutedEventArgs e)
         => ViewModel?.RemoveSelectedResourceFolder();
@@ -265,7 +287,14 @@ public partial class MainWindow : Window
         return files.Count == 0 ? null : files[0].Path.LocalPath;
     }
 
-    private async Task<string?> SaveFileAsync(string title, string suggestedFileName)
+    private Task<string?> SaveFileAsync(string title, string suggestedFileName)
+        => SaveFileAsync(title, suggestedFileName, "JSON files", ["json"]);
+
+    private async Task<string?> SaveFileAsync(
+        string title,
+        string suggestedFileName,
+        string fileTypeName,
+        IReadOnlyList<string> extensions)
     {
         var topLevel = GetTopLevel(this);
         if (topLevel is null)
@@ -279,9 +308,9 @@ public partial class MainWindow : Window
             SuggestedFileName = suggestedFileName,
             FileTypeChoices =
             [
-                new FilePickerFileType("JSON files")
+                new FilePickerFileType(fileTypeName)
                 {
-                    Patterns = ["*.json"]
+                    Patterns = extensions.Select(extension => $"*.{extension}").ToArray()
                 }
             ],
         });

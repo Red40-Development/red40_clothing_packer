@@ -73,6 +73,10 @@
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Content="Help" Command="{Binding HelpCommand}" />
+            <Button Content="Create Diagnostic Bundle..."
+                    Click="CreateDiagnosticBundle_Click"
+                    IsEnabled="{Binding CanCreateDiagnosticBundle}"
+                    ToolTip.Tip="Create a compact ZIP for support. Metadata and scripts are preserved; other file contents are replaced with placeholders." />
             <Button Content="Analyze" Command="{Binding AnalyzeCommand}" IsEnabled="{Binding CanAnalyzeResources}" />
             <Button Content="Build Preview" Command="{Binding BuildPreviewCommand}" IsEnabled="{Binding CanBuildPreviewPlan}" />
             <Button Content="Apply" IsEnabled="{Binding CanApplyPlan}" Click="Apply_Click" />

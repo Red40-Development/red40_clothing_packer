@@ -25,6 +25,8 @@ As of [this commit](https://github.com/citizenfx/fivem/commit/a6f68afb776e6df44a
 - Enable `Optimize YMT usage` before Analyze if you want the planner to rearrange component/prop lanes across generated YMTs to reduce the target collection count. Leave it off to keep source packs grouped more conservatively. Note that if you have a large number of a single component such as JBIB this will tend to leave ymts with little to no other items in them.
 
 - Now featuring a graphical representation of the repacked ymts
+- Create a compact support archive with `Create Diagnostic Bundle...`. The archive preserves `.meta`, `.ymt`, `.xml`, and `.lua` contents, replaces all other file contents with a small placeholder, and omits dot-directories.
+
 
 ![Preview 1](.github/assets/red40_clothing_packer_1.png)
 
@@ -83,6 +85,7 @@ ClothingRepacker.Cli validate --resources <path>
 ClothingRepacker.Cli validate --resource <path_to_resource> [--resource <path_to_resource> ...] --generated-root <folder>
 ClothingRepacker.Cli report --plan <plan.json> [--out <report.txt>]
 ClothingRepacker.Cli export-xml --folder <path> [--overwrite]
+ClothingRepacker.Cli diagnostics --folder <path> --out <bundle.zip>
 ```
 
 By default, the CLI checks the latest GitHub release when a command starts and prints a notice if a newer version is available. Add `--no-version-check` to any command, or set `RED40_NO_VERSION_CHECK=1`, to skip the check.
@@ -231,6 +234,14 @@ Legacy list-only manifests remain readable with reduced authority. They can rest
 ```bash
 ClothingRepacker.Cli export-xml --folder .
 ```
+
+Create a compact ZIP suitable for uploading with a support request:
+
+```bash
+ClothingRepacker.Cli diagnostics --folder ./my-clothing-resource --out ./red40-diagnostics.zip
+```
+
+The bundle preserves the folder structure and the contents of `.meta`, `.ymt`, `.xml`, and `.lua` files. Other files keep their names but contain only `.`; dot-directories such as `.git` and `.vscode` are omitted.
 
 
 NOTE:

@@ -14,6 +14,11 @@ public sealed class WorkflowRunner : IRepackerWorkflow
 
     public Task<ExportXmlResult> ExportXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         => RunWorkflowAsync(service => service.ExportYmtsToXmlAsync(folderPath, overwrite, progress, cancellationToken), cancellationToken);
+    public Task<DiagnosticBundleResult> CreateDiagnosticBundleAsync(IReadOnlyList<string> resourceFolders, string outputPath, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
+        => Task.Run(
+            () => new DiagnosticBundleService().CreateAsync(resourceFolders, outputPath, progress, cancellationToken),
+            cancellationToken);
+
 
     public Task<AnalyzeResult> AnalyzeAsync(IReadOnlyList<string> resourceFolders, string generatedResourcesRoot, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         => RunWorkflowAsync(service => service.AnalyzeAsync(resourceFolders, generatedResourcesRoot, targetResource, settings, progress, cancellationToken), cancellationToken);

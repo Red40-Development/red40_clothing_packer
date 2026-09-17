@@ -212,7 +212,7 @@ public sealed class StreamRenamePlanner
                 reason,
                 $"{mappingKind}:{mappingIndex}",
                 claims.Count));
-    }
+        }
     }
 
     private static IReadOnlyList<(string Source, string Target)> BuildPropCollectionPairs(PropMapping mapping)

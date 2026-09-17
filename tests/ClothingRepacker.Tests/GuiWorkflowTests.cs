@@ -1,5 +1,6 @@
 using ClothingRepacker.Core;
 using ClothingRepacker.Core.Models;
+using ClothingRepacker.Core.Services;
 using ClothingRepacker.Gui.Models;
 using ClothingRepacker.Gui.Services;
 using ClothingRepacker.Gui.ViewModels;
@@ -604,6 +605,9 @@ public class GuiWorkflowTests
         public BuildResult BuildResult { get; init; } = new(Path.GetTempPath(), []);
         public Exception? BuildException { get; init; }
         public RestoreManifestPreview RestorePreview { get; init; } = new(string.Empty, [], [], []);
+
+        public Task<DiagnosticBundleResult> CreateDiagnosticBundleAsync(IReadOnlyList<string> resourceFolders, string outputPath, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
+            => Task.FromResult(new DiagnosticBundleResult(outputPath, 0, 0, 0, 0));
 
         public async Task<ExportXmlResult> ExportXmlAsync(string folderPath, bool overwrite, IProgress<OperationProgress> progress, CancellationToken cancellationToken)
         {

@@ -53,6 +53,7 @@ public static class ProgramEntry
         "validate",
         "report",
         "export-xml",
+        "diagnostics",
     };
 
     private static readonly HashSet<string> RepeatableOptions = new(StringComparer.OrdinalIgnoreCase)
@@ -115,6 +116,7 @@ public static class ProgramEntry
                 "validate" => await RunValidateAsync(service, options),
                 "report" => await RunReportAsync(service, options),
                 "export-xml" => await RunExportXmlAsync(service, options),
+                "diagnostics" => await RunDiagnosticsAsync(options),
                 _ => throw new InvalidOperationException($"Unknown command '{command}'."),
             };
         }
@@ -277,6 +279,25 @@ public static class ProgramEntry
 
         return 0;
     }
+    private static async Task<int> RunDiagnosticsAsync(CliOptions options)
+    {
+        using var progressWriter = new ConsoleProgressWriter();
+        var result = await new DiagnosticBundleService().CreateAsync(
+            [Required(options, "--folder")],
+            Required(options, "--out"),
+            CreateConsoleProgress(progressWriter));
+        progressWriter.CompleteLine();
+        Console.WriteLine(
+            $"Created diagnostic bundle at {result.OutputPath} with {result.FileCount} file(s): "
+            + $"{result.PreservedFileCount} preserved, {result.PlaceholderFileCount} replaced with placeholders.");
+        if (result.SkippedLinkCount > 0)
+        {
+            Console.Error.WriteLine($"Skipped {result.SkippedLinkCount} unresolved or recursive link(s).");
+        }
+
+        return 0;
+    }
+
 
     private static Task<AnalyzeResult> AnalyzeWithOptionsAsync(RepackerService service, CliOptions options, string targetResource, MergePlanSettings settings, IProgress<OperationProgress> progress)
     {
@@ -323,6 +344,7 @@ clothing-repacker validate --resources <path>
 clothing-repacker validate --resource <path> [--resource <path> ...] --generated-root <folder>
 clothing-repacker report --plan <plan.json> [--out <report.txt>]
 clothing-repacker export-xml --folder <path> [--overwrite]
+clothing-repacker diagnostics --folder <path> --out <bundle.zip>
 
 Global options:
   --no-version-check   Skip the GitHub update check.
@@ -474,6 +496,10 @@ Analyze options:
                 "--no-version-check",
                 "--folder",
                 "--overwrite"),
+            "diagnostics" => Allowed(
+                "--no-version-check",
+                "--folder",
+                "--out"),
             _ => throw new InvalidOperationException($"Unknown command '{command}'."),
         };
 
@@ -514,6 +540,10 @@ Analyze options:
                 break;
             case "export-xml":
                 Required(options, "--folder");
+                break;
+            case "diagnostics":
+                Required(options, "--folder");
+                Required(options, "--out");
                 break;
         }
     }
@@ -683,6 +713,7 @@ Analyze options:
             "build-creature-metadata" => $"{prefix}{progressBar} creature metadata building{path}",
             "write-target" => $"{prefix}{progressBar} target collections built | files written {progress.WrittenFileCount}{path}",
             "export-file" => $"{prefix}{progressBar} files | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
+            "bundle-file" => $"{prefix} files bundled {progress.Current}{path}",
             "build-staging" => $"{prefix} {progress.Message}",
             "copy-source-resource" => $"{prefix}{progressBar} source resources copied{path}",
             "rename-stream" => $"{prefix}{progressBar} stream files renamed | backups {progress.BackupCount}{path}",

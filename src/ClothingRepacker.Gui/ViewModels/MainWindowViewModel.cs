@@ -418,6 +418,9 @@ public sealed class MainWindowViewModel : ViewModelBase
     public double ProgressValue => ProgressTotal <= 0 ? 0 : (double)ProgressCurrent / ProgressTotal * 100;
     public bool HasDeterminateProgress => ProgressTotal > 0;
     public bool CanExportXml => CanRunWithResources();
+    public bool CanCreateDiagnosticBundle => !IsBusy
+        && ResourcePaths.Count > 0
+        && ResourcePaths.All(Directory.Exists);
     public bool CanAnalyzeResources => CanRunWithResources();
     public bool CanBuildPreviewPlan => CanBuildPreview();
     public bool CanApplyPlan => CanApply();
@@ -580,6 +583,25 @@ public sealed class MainWindowViewModel : ViewModelBase
             SetSummaryLines("XML export", Summary);
             Status = $"XML export complete. Wrote {writtenFiles.Count} file(s), skipped {skippedFiles.Count}.";
         });
+    public async Task CreateDiagnosticBundleAsync(string outputPath)
+        => await RunOperationAsync("Creating diagnostic bundle", async (progress, token) =>
+        {
+            var result = await _workflow.CreateDiagnosticBundleAsync(ResourcePaths.ToList(), outputPath, progress, token);
+            if (!Files.Contains(result.OutputPath, StringComparer.OrdinalIgnoreCase))
+            {
+                Files.Add(result.OutputPath);
+            }
+
+            Status = $"Diagnostic bundle created: {result.OutputPath}";
+            LogLines.Add(
+                $"Diagnostic bundle contains {result.FileCount} file(s): "
+                + $"{result.PreservedFileCount} preserved, {result.PlaceholderFileCount} replaced with placeholders.");
+            if (result.SkippedLinkCount > 0)
+            {
+                Warnings.Add($"Diagnostic bundle skipped {result.SkippedLinkCount} unresolved or recursive link(s).");
+            }
+        });
+
 
     public async Task AnalyzeAsync()
         => await RunOperationAsync("Analyzing resources", async (progress, token) =>
@@ -849,7 +871,7 @@ public sealed class MainWindowViewModel : ViewModelBase
 
             LogLines.Add($"Error: {ex}");
         }
-      finally
+        finally
         {
             _operationCts.Dispose();
             _operationCts = null;
@@ -887,6 +909,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             "build-creature-metadata" => progress.Message ?? $"Building creature metadata {progress.Current}/{progress.Total}{path}",
             "write-target" => $"Built {progress.Current}/{progress.Total} target collections | files {progress.WrittenFileCount}{path}",
             "export-file" => $"Exported {progress.Current}/{progress.Total} | written {progress.WrittenFileCount} | skipped {progress.SkippedCount}{path}",
+            "bundle-file" => $"Bundled {progress.Current} files{path}",
             "copy-source-resource" => $"Copied {progress.Current}/{progress.Total} source resources{path}",
             "copy-source-file" => $"Copied {progress.Current}/{progress.Total} source files{path}",
             "copy-generated-file" => $"Copied {progress.Current}/{progress.Total} generated files{path}",
@@ -1232,6 +1255,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         MoveResourceDownCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(PlannedBackupCount));
         OnPropertyChanged(nameof(CanExportXml));
+        OnPropertyChanged(nameof(CanCreateDiagnosticBundle));
         OnPropertyChanged(nameof(CanAnalyzeResources));
         OnPropertyChanged(nameof(CanBuildPreviewPlan));
         OnPropertyChanged(nameof(CanApplyPlan));
