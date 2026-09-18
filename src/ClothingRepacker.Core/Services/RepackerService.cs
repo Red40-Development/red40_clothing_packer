@@ -67,6 +67,11 @@ public sealed class RepackerService
 
         var fullGeneratedResourcesRoot = Path.GetFullPath(generatedResourcesRoot);
         var scanItems = _scanner.ScanResourceFolders(resourceFolders, progress, cancellationToken);
+        if (scanItems.Count == 0)
+        {
+            throw new InvalidOperationException("At least one non-backup resource folder is required.");
+        }
+
         return await AnalyzeAsync(
             scanItems,
             FindCommonResourcesRoot(scanItems.Select(item => item.ResourceRoot)),
@@ -335,8 +340,6 @@ public sealed class RepackerService
         var creatureMetadataOutputs = BuildCreatureMetadataOutputPlans(
             targetPlans,
             sourceYmtSummaries,
-            brokenCreatureMetadataBackups,
-            missingCreatureMetadataReferences,
             sourceCreatureMetadataBindings,
             settings,
             targetResource);
@@ -2191,35 +2194,6 @@ public sealed class RepackerService
             .ToDictionary(range => range.SlotId, range => range);
 
 
-    private static bool TargetHasUnavailableCreatureMetadata(
-        TargetCollectionPlan targetPlan,
-        IReadOnlyList<SourceYmtSummary> sourceYmts,
-        IReadOnlyList<BrokenCreatureMetadataBackupPlan> brokenCreatureMetadataBackups,
-        IReadOnlyList<MissingCreatureMetadataReference> missingCreatureMetadataReferences)
-    {
-        if (brokenCreatureMetadataBackups.Count == 0
-            && missingCreatureMetadataReferences.Count == 0)
-        {
-            return false;
-        }
-
-        var targetResources = sourceYmts
-            .Where(source => targetPlan.SourceYmts.Contains(source.Path, StringComparer.OrdinalIgnoreCase))
-            .Select(source => source.Resource)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        if (brokenCreatureMetadataBackups
-            .Select(backup => backup.BackupPath.Split('/')[0])
-            .Any(resource => targetResources.Contains(resource)))
-        {
-            return true;
-        }
-
-        return missingCreatureMetadataReferences
-            .Select(reference => reference.Resource)
-            .Any(resource => targetResources.Contains(resource));
-    }
-
     private static IReadOnlyList<CreatureMetadataSourceBinding> BuildSourceCreatureMetadataBindings(
         IReadOnlyList<SourceYmt> sources,
         IReadOnlyList<SourceCreatureMetadata> creatureMetadata,
@@ -2281,8 +2255,6 @@ public sealed class RepackerService
     private static List<CreatureMetadataOutputPlan> BuildCreatureMetadataOutputPlans(
         IReadOnlyList<TargetCollectionPlan> targetPlans,
         IReadOnlyList<SourceYmtSummary> sourceYmts,
-        IReadOnlyList<BrokenCreatureMetadataBackupPlan> brokenCreatureMetadataBackups,
-        IReadOnlyList<MissingCreatureMetadataReference> missingCreatureMetadataReferences,
         IReadOnlyList<CreatureMetadataSourceBinding> sourceBindings,
         MergePlanSettings settings,
         string targetResource)
@@ -2294,15 +2266,6 @@ public sealed class RepackerService
 
         foreach (var targetPlan in targetPlans)
         {
-            if (TargetHasUnavailableCreatureMetadata(
-                    targetPlan,
-                    sourceYmts,
-                    brokenCreatureMetadataBackups,
-                    missingCreatureMetadataReferences))
-            {
-                continue;
-            }
-
             var targetBindings = targetPlan.SourceYmts
                 .Where(sourceBindingsByYmt.ContainsKey)
                 .SelectMany(sourcePath => sourceBindingsByYmt[sourcePath])

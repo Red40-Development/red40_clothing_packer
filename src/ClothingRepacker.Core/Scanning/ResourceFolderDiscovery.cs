@@ -20,6 +20,11 @@ public static class ResourceFolderDiscovery
         var resources = new List<string>();
         foreach (var directory in directories)
         {
+            if (IsRepackerBackupFolder(directory))
+            {
+                continue;
+            }
+
             if (IsBracketFolder(directory))
             {
                 var childResources = FindResourceFoldersUnder(directory);
@@ -38,6 +43,11 @@ public static class ResourceFolderDiscovery
         if (!Directory.Exists(root))
         {
             return includeMissing ? [root] : [];
+        }
+
+        if (IsRepackerBackupFolder(root))
+        {
+            return [];
         }
 
         if (IsBracketFolder(root))
@@ -76,6 +86,11 @@ public static class ResourceFolderDiscovery
         foreach (var directory in Directory.GetDirectories(root)
                      .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
+            if (IsRepackerBackupFolder(directory))
+            {
+                continue;
+            }
+
             if (IsResourceFolder(directory))
             {
                 resources.Add(directory);
@@ -92,5 +107,16 @@ public static class ResourceFolderDiscovery
     {
         var name = Path.GetFileName(path);
         return name.Contains('[') && name.Contains(']');
+    }
+
+    private static bool IsRepackerBackupFolder(string path)
+    {
+        if (File.Exists(Path.Combine(path, "backup-manifest.json")))
+        {
+            return true;
+        }
+
+        return Directory.EnumerateDirectories(path)
+            .Any(directory => File.Exists(Path.Combine(directory, "backup-manifest.json")));
     }
 }

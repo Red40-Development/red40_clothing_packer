@@ -308,6 +308,53 @@ public class CreatureMetadataTests
     }
 
     [Fact]
+    public async Task BuildPreservesValidCreatureMetadataWhenOtherSourceInTargetHasMissingReference()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"mixed-missing-reference-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        WriteResource(resources, "pack_valid", componentExpressionIndex: 4, propExpressionIndex: 9);
+
+        var brokenDir = Path.Combine(resources, "pack_broken");
+        Directory.CreateDirectory(Path.Combine(brokenDir, "stream"));
+        new XDocument(BuildPedVariation("pack_broken", includeHighHeelSignal: false, includeHairScalePropSignal: false))
+            .Save(Path.Combine(brokenDir, "stream", "mp_f_freemode_01_pack_broken.ymt.xml"));
+        new XDocument(BuildShopMeta("mp_creaturemetadata_missing", "pack_broken")).Save(Path.Combine(brokenDir, "shop.meta"));
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var outputRoot = Path.Combine(root, "out");
+
+        await service.BuildAsync(analyze.Plan, outputRoot, new BuildOptions
+        {
+            IncludeYmtXml = true,
+        });
+
+        Assert.Single(analyze.Plan.MissingCreatureMetadataReferences);
+        Assert.Equal("pack_broken", analyze.Plan.MissingCreatureMetadataReferences[0].Resource);
+
+        var targetWithMetadata = Assert.Single(analyze.Plan.CreatureMetadataOutputs);
+        Assert.Contains("merged_f_001", targetWithMetadata.TargetCollections);
+
+        var metadataPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "stream",
+            "MP_CreatureMetadata_merged_f_001.ymt.xml");
+        var xml = XDocument.Load(metadataPath);
+        var compExpressions = xml.Root!.Element("pedCompExpressions")!.Elements("Item").ToList();
+        Assert.Single(compExpressions);
+        Assert.Equal([4], ReadValues(xml, "pedCompExpressions", "pedCompExpressionIndex"));
+
+        var shopMetaPath = Path.Combine(
+            outputRoot,
+            "zz_merged_clothing_meta",
+            "data",
+            "mp_f_freemode_01_merged_f_001.meta");
+        var shopMeta = XDocument.Load(shopMetaPath);
+        Assert.Equal("MP_CreatureMetadata_merged_f_001", shopMeta.Root?.Element("creatureMetaData")?.Value.Trim());
+    }
+
+    [Fact]
     public async Task BuildRepairsHighHeelCreatureMetadataWhenSourceMetadataIsMissing()
     {
         var root = Path.Combine(Path.GetTempPath(), $"high-heel-repair-test-{Guid.NewGuid():N}");

@@ -55,6 +55,38 @@ public class AnalyzeTests
     }
 
     [Fact]
+    public async Task AnalyzeDoesNotRediscoverRepackerBackupsAsResources()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"analyze-ignore-backups-test-{Guid.NewGuid():N}");
+        var resources = Path.Combine(root, "resources");
+        var liveResource = Path.Combine(resources, "gang_flags");
+        var backupRun = Path.Combine(resources, "backups", "2026-09-17T120000Z-test");
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), liveResource);
+        TestFixturePaths.CopyDirectory(TestFixturePaths.ResourceDirectory("gang_flags"), Path.Combine(backupRun, "gang_flags"));
+        await File.WriteAllTextAsync(Path.Combine(backupRun, "backup-manifest.json"), "{}");
+
+        var service = new RepackerService(new CompositeYmtCodec(new XmlPassthroughYmtCodec(), new CodeWalkerYmtCodec()));
+        var analyze = await service.AnalyzeAsync(resources, "zz_merged_clothing_meta", new MergePlanSettings());
+        var explicitAnalyze = await service.AnalyzeAsync(
+            [liveResource, Path.Combine(resources, "backups")],
+            Path.Combine(root, "generated"),
+            "zz_merged_clothing_meta",
+            new MergePlanSettings());
+
+        foreach (var result in new[] { analyze, explicitAnalyze })
+        {
+            Assert.NotEmpty(result.Plan.SourceYmts);
+            Assert.All(result.Plan.SourceYmts, source => Assert.Equal("gang_flags", source.Resource));
+            Assert.DoesNotContain(
+                result.Plan.ResourceRoots,
+                resourceRoot => resourceRoot.Equals(Path.Combine(resources, "backups"), StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(
+                result.Plan.Errors,
+                error => error.Contains("Ambiguous stream rename source claim", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
     public async Task AnalyzeReportsProgressWhileProcessingFiles()
     {
         var root = Path.Combine(Path.GetTempPath(), $"analyze-progress-test-{Guid.NewGuid():N}");
